@@ -1,93 +1,83 @@
 # Setup Guide
 
-This guide will help you create an Xcode project and build the Portfolio Ledger iOS app.
+This repo already contains an Xcode project for the PortfolioLedger iOS app.
+Do **not** create a new Xcode project — just open the existing one.
 
-## Quick Start (Xcode Project)
+## Quick Start
 
-### Option 1: Create New Xcode Project
+1. Install Xcode 26.0+ from the App Store.
 
-1. **Open Xcode** and select "Create a new Xcode project"
+2. Configure signing (first time only):
+   - Edit `Config/Local.xcconfig` and set your development team ID:
+     ```
+     LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+     ```
+   - Find your Team ID in Xcode → Settings → Accounts → View Details
+   - Or leave it blank and use Xcode's manual signing (see below)
 
-2. **Choose Template**:
-   - Select "iOS" → "App"
-   - Click "Next"
+3. Open the existing project:
+   ```bash
+   open PortfolioLedger/PortfolioLedger.xcodeproj
+   ```
 
-3. **Project Settings**:
-   - Product Name: `PortfolioLedger`
-   - Team: Select your development team
-   - Organization Identifier: `com.yourname.portfolioledger`
-   - Interface: `SwiftUI`
-   - Language: `Swift`
-   - Storage: `None`
-   - Click "Next"
+### Build Configuration
 
-4. **Save Location**:
-   - Choose this repository directory
-   - Click "Create"
+The project uses xcconfig files for build settings:
 
-5. **The project is already set up!**:
-   - All source files are in the `PortfolioLedger/` directory
-   - The Xcode project file is `PortfolioLedger/PortfolioLedger.xcodeproj`
-   - Just open the project and build!
+- **`Config/Base.xcconfig`**: Shared settings (bundle ID, deployment target, version)
+- **`Config/Local.xcconfig`**: Your development team ID (git-ignored, customize per machine)
+- **`PortfolioLedger/Shared.xcconfig`**: Includes both Base and Local configs
 
-6. **Configure Info.plist** (if needed):
-   - The Info.plist in Resources/ contains the necessary configuration
-   - Xcode 14+ typically generates this automatically
+This setup keeps your personal signing settings out of version control.
 
-7. **Build and Run**:
-   - Select an iOS simulator or device
-   - Press Cmd+R to build and run
+## Build & Run
 
-### Option 2: Using Swift Package Manager
+1. Pick a simulator (or a device).
+2. Cmd+R
 
-You can also use this as a Swift package:
-
-```bash
-# Navigate to the project directory
-cd portfolio-ledger-app
-
-# Build the package
-swift build
-
-# Run tests (if you add them)
-swift test
-```
-
-Note: The Package.swift is configured for library development. For the iOS app, use Option 1.
-
-## Project Structure in Xcode
-
-After adding files, your Xcode project should look like this:
+## Project Structure
 
 ```
-PortfolioLedger (project)
-├── App
-│   ├── PortfolioLedgerApp.swift
-│   └── ContentView.swift
-├── Models
-│   ├── Account.swift
-│   ├── Instrument.swift
-│   ├── Transaction.swift
-│   └── DerivedData.swift
-├── Engine
-│   └── LedgerEngine.swift
-├── Views
-│   ├── DashboardView.swift
-│   ├── PositionsView.swift
-│   ├── TransactionsView.swift
-│   ├── UnderlierDetailView.swift
-│   ├── SettingsView.swift
-│   └── TradeEntry
-│       ├── AddEquityTradeView.swift
-│       ├── AddOptionTradeView.swift
-│       ├── AssignOptionView.swift
-│       └── TradeEntryMenuView.swift
-├── ViewModels (empty for now)
-├── Services
-│   ├── DataStore.swift
-│   └── CSVService.swift
-└── Resources
-    └── Info.plist
+portfolio-ledger-app/
+├── Config/
+│   ├── Base.xcconfig           # Shared build settings
+│   └── Local.xcconfig          # Your dev team (git-ignored)
+│
+└── PortfolioLedger/
+    ├── PortfolioLedger.xcodeproj/
+    ├── Shared.xcconfig         # Includes Base & Local
+    ├── Assets.xcassets/
+    │
+    ├── App/
+    │   ├── PortfolioLedgerApp.swift
+    │   └── ContentView.swift
+    │
+    ├── Models/
+    │   ├── DerivedData.swift
+    │   ├── Instrument.swift
+    │   └── Transaction.swift
+    │
+    ├── Engine/
+    │   └── LedgerEngine.swift
+    │
+    ├── Services/
+    │   ├── DataStore.swift
+    │   └── CSVService.swift
+    │
+    ├── Views/
+    │   ├── DashboardView.swift
+    │   ├── PositionsView.swift
+    │   ├── TransactionsView.swift
+    │   ├── UnderlierDetailView.swift
+    │   ├── SettingsView.swift
+    │   └── TradeEntry/
+    │       ├── AddEquityTradeView.swift
+    │       ├── AddOptionTradeView.swift
+    │       ├── AssignOptionView.swift
+    │       ├── ClosePositionView.swift
+    │       └── TradeEntryMenuView.swift
+    │
+    └── Resources/
 ```
 
 ## Troubleshooting
@@ -114,8 +104,8 @@ If you see compilation errors:
 
 1. **App crashes on launch**:
    - Check the debug console for errors
-   - Verify DataStore.shared is initialized correctly
-   - Ensure all @EnvironmentObject dependencies are provided
+   - Verify `DataStore.shared` is initialized correctly
+   - Ensure all `@EnvironmentObject` dependencies are provided
 
 2. **Data not persisting**:
    - Check that the app has write permissions to Documents directory
@@ -125,17 +115,15 @@ If you see compilation errors:
 
 ### Running on Simulator
 
-1. Select iPhone 14 Pro or later (iOS 16+)
+1. Select any iPhone/iPad simulator that meets the project’s deployment target
 2. Press Cmd+R to run
-3. Use Cmd+Shift+H to go home
-4. Use Debug → Location to test location features (if needed)
 
 ### Running on Device
 
 1. Connect your iPhone/iPad via USB
 2. Select your device in Xcode
 3. If you see "Signing" errors:
-   - Go to project settings → Signing & Capabilities
+   - Go to target → Signing & Capabilities
    - Select your Team
    - Xcode will automatically fix signing
 4. Press Cmd+R to run
@@ -162,6 +150,16 @@ To find it:
 2. Print the Documents directory in DataStore
 3. Open in Finder using Cmd+Shift+G
 
+## .gitignore
+
+The following are already git-ignored:
+
+- `Config/Local.xcconfig` (developer-specific signing)
+- `PortfolioLedger.xcodeproj/xcuserdata/`
+- `PortfolioLedger.xcodeproj/project.xcworkspace/xcuserdata/`
+- `.DS_Store`
+- Xcode build artifacts
+
 ## Next Steps
 
 Once the app is running:
@@ -173,13 +171,12 @@ Once the app is running:
 
 ## Additional Resources
 
-- [SwiftUI Documentation](https://developer.apple.com/documentation/swiftui/)
-- [Swift Package Manager](https://swift.org/package-manager/)
-- [Xcode Help](https://developer.apple.com/xcode/)
+- SwiftUI Documentation: https://developer.apple.com/documentation/swiftui
+- Xcode Help: https://developer.apple.com/xcode
 
 ## Support
 
 For issues or questions:
 - Check the README.md for architecture details
-- Review the source code (it's documented)
+- Review the source code
 - Open an issue on GitHub

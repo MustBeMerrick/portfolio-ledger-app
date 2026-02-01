@@ -77,33 +77,45 @@ The engine handles:
 ### File Structure
 
 ```
-PortfolioLedger/
-├── Models/
-│   ├── Account.swift
-│   ├── Instrument.swift
-│   ├── Transaction.swift
-│   └── DerivedData.swift
-├── Engine/
-│   └── LedgerEngine.swift
-├── Views/
-│   ├── DashboardView.swift
-│   ├── PositionsView.swift
-│   ├── TransactionsView.swift
-│   ├── UnderlierDetailView.swift
-│   ├── SettingsView.swift
-│   └── TradeEntry/
-│       ├── AddEquityTradeView.swift
-│       ├── AddOptionTradeView.swift
-│       ├── AssignOptionView.swift
-│       └── TradeEntryMenuView.swift
-├── ViewModels/
-├── Services/
-│   ├── DataStore.swift
-│   └── CSVService.swift
-├── App/
-│   ├── PortfolioLedgerApp.swift
-│   └── ContentView.swift
-└── Resources/
+portfolio-ledger-app/
+├── Config/
+│   ├── Base.xcconfig          # Shared build settings
+│   └── Local.xcconfig          # Local dev team (git-ignored)
+├── PortfolioLedger/
+│   ├── PortfolioLedger.xcodeproj/
+│   ├── Shared.xcconfig         # Includes Base & Local configs
+│   ├── Assets.xcassets/
+│   ├── App/
+│   │   ├── PortfolioLedgerApp.swift
+│   │   └── ContentView.swift
+│   ├── Models/
+│   │   ├── DerivedData.swift
+│   │   ├── Instrument.swift
+│   │   └── Transaction.swift
+│   ├── Engine/
+│   │   └── LedgerEngine.swift
+│   ├── Services/
+│   │   ├── DataStore.swift
+│   │   └── CSVService.swift
+│   ├── Views/
+│   │   ├── DashboardView.swift
+│   │   ├── PositionsView.swift
+│   │   ├── TransactionsView.swift
+│   │   ├── UnderlierDetailView.swift
+│   │   ├── SettingsView.swift
+│   │   └── TradeEntry/
+│   │       ├── AddEquityTradeView.swift
+│   │       ├── AddOptionTradeView.swift
+│   │       ├── AssignOptionView.swift
+│   │       ├── ClosePositionView.swift
+│   │       └── TradeEntryMenuView.swift
+│   └── Resources/
+├── README.md
+├── SETUP.md
+├── QUICKSTART.md
+├── CONTRIBUTING.md
+├── PROJECT_SUMMARY.md
+└── LICENSE
 ```
 
 ## FIFO Rules
@@ -131,9 +143,9 @@ The option position is closed, and the premium is marked as consumed. The genera
 ## Getting Started
 
 ### Requirements
-- iOS 16.0+
-- Xcode 14.0+
-- Swift 5.7+
+- iOS 26.0+
+- Xcode 26.0+
+- Swift 5.0+
 
 ### Building the App
 
@@ -143,15 +155,21 @@ The option position is closed, and the premium is marked as consumed. The genera
    cd portfolio-ledger-app
    ```
 
-2. Open in Xcode:
-   - Create a new iOS App project in Xcode
-   - Replace the default files with the `PortfolioLedger/` directory contents
-   - Build and run on simulator or device
+2. Configure signing (first time only):
+   - Edit `Config/Local.xcconfig` and set your development team ID:
+     ```
+     LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+     ```
+   - Or use Xcode's automatic signing (see SETUP.md)
 
-3. Or use the files directly:
-   - The code is organized in a module-like structure
-   - All Swift files can be added to an Xcode project
-   - No external dependencies required
+3. Open in Xcode:
+   ```bash
+   open PortfolioLedger/PortfolioLedger.xcodeproj
+   ```
+
+4. Build and run:
+   - Select a simulator or device
+   - Press Cmd+R to build and run
 
 ### First Steps
 

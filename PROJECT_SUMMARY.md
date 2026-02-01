@@ -34,7 +34,7 @@ A complete iOS application for tracking investment trades with tax-accurate FIFO
   - Import with round-trip support
   - Proper CSV escaping and parsing
 
-### Views (10 files)
+### Views (11 files)
 - ✅ `PortfolioLedgerApp.swift` - App entry point
 - ✅ `ContentView.swift` - Tab navigation
 - ✅ `DashboardView.swift` - P/L summary and open positions
@@ -45,6 +45,7 @@ A complete iOS application for tracking investment trades with tax-accurate FIFO
 - ✅ `AddEquityTradeView.swift` - Equity buy/sell entry form
 - ✅ `AddOptionTradeView.swift` - Option trade entry form
 - ✅ `AssignOptionView.swift` - Option assignment workflow
+- ✅ `ClosePositionView.swift` - Position closing workflow
 - ✅ `TradeEntryMenuView.swift` - Trade entry launcher
 
 ### Documentation (4 files)
@@ -55,57 +56,69 @@ A complete iOS application for tracking investment trades with tax-accurate FIFO
 
 ### Configuration Files
 - ✅ `.gitignore` - Xcode/Swift exclusions
-- ✅ `Package.swift` - Swift package definition
-- ✅ `Info.plist` - iOS app configuration
+- ✅ `Config/Base.xcconfig` - Shared build settings
+- ✅ `Config/Local.xcconfig` - Local development team (git-ignored)
+- ✅ `PortfolioLedger/Shared.xcconfig` - Main config file
 - ✅ `LICENSE` - MIT license
 
 ## File Count
 
-- **Swift Files**: 17
-- **Documentation**: 4
-- **Configuration**: 4
+- **Swift Files**: 18
+- **Documentation**: 5
+- **Configuration**: 3 xcconfig files
 - **Total Lines of Code**: ~2,500+
 
 ## Project Structure
 
 ```
 portfolio-ledger-app/
+├── Config/
+│   ├── Base.xcconfig
+│   └── Local.xcconfig (git-ignored)
+│
+├── PortfolioLedger/
+│   ├── PortfolioLedger.xcodeproj/
+│   ├── Shared.xcconfig
+│   ├── Assets.xcassets/
+│   │
+│   ├── App/
+│   │   ├── PortfolioLedgerApp.swift
+│   │   └── ContentView.swift
+│   │
+│   ├── Models/
+│   │   ├── DerivedData.swift
+│   │   ├── Instrument.swift
+│   │   └── Transaction.swift
+│   │
+│   ├── Engine/
+│   │   └── LedgerEngine.swift
+│   │
+│   ├── Services/
+│   │   ├── DataStore.swift
+│   │   └── CSVService.swift
+│   │
+│   ├── Views/
+│   │   ├── DashboardView.swift
+│   │   ├── PositionsView.swift
+│   │   ├── TransactionsView.swift
+│   │   ├── UnderlierDetailView.swift
+│   │   ├── SettingsView.swift
+│   │   └── TradeEntry/
+│   │       ├── AddEquityTradeView.swift
+│   │       ├── AddOptionTradeView.swift
+│   │       ├── AssignOptionView.swift
+│   │       ├── ClosePositionView.swift
+│   │       └── TradeEntryMenuView.swift
+│   │
+│   └── Resources/
+│
+├── .gitignore
 ├── LICENSE
 ├── README.md
 ├── SETUP.md
 ├── QUICKSTART.md
 ├── CONTRIBUTING.md
-├── PROJECT_SUMMARY.md (this file)
-├── Package.swift
-├── .gitignore
-└── PortfolioLedger/
-    ├── App/
-    │   ├── PortfolioLedgerApp.swift
-    │   └── ContentView.swift
-    ├── Models/
-    │   ├── Account.swift
-    │   ├── Instrument.swift
-    │   ├── Transaction.swift
-    │   └── DerivedData.swift
-    ├── Engine/
-    │   └── LedgerEngine.swift
-    ├── Views/
-    │   ├── DashboardView.swift
-    │   ├── PositionsView.swift
-    │   ├── TransactionsView.swift
-    │   ├── UnderlierDetailView.swift
-    │   ├── SettingsView.swift
-    │   └── TradeEntry/
-    │       ├── AddEquityTradeView.swift
-    │       ├── AddOptionTradeView.swift
-    │       ├── AssignOptionView.swift
-    │       └── TradeEntryMenuView.swift
-    ├── ViewModels/ (empty, for future use)
-    ├── Services/
-    │   ├── DataStore.swift
-    │   └── CSVService.swift
-    └── Resources/
-        └── Info.plist
+└── PROJECT_SUMMARY.md (this file)
 ```
 
 ## Features Implemented
@@ -189,12 +202,12 @@ As specified in the goals:
 
 ## Next Steps for Users
 
-1. **Set up Xcode project** (see SETUP.md)
-2. **Build and run** the app
-3. **Add accounts** in Settings
-4. **Enter trades** using the "+" button
-5. **Review positions** in the Positions tab
-6. **Export data** regularly for backups
+1. **Configure signing** - Edit `Config/Local.xcconfig` with your Team ID
+2. **Open project** - `open PortfolioLedger/PortfolioLedger.xcodeproj`
+3. **Build and run** - Press Cmd+R in Xcode
+4. **Add accounts** - Settings tab → Add Account
+5. **Enter trades** - Dashboard "+" button
+6. **Export data** - Settings → Export CSV for backups
 
 ## Development Notes
 
