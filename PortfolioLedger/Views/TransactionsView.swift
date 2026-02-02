@@ -52,7 +52,7 @@ struct TransactionsView: View {
             rows.append(LedgerRow.equityGroup(transactions: txns, instrument: instrument))
         }
 
-        return rows.sorted { $0.latestTimestamp > $1.latestTimestamp }
+        return rows.sorted { $0.openingTimestamp > $1.openingTimestamp }
     }
 
     var body: some View {
@@ -409,6 +409,7 @@ struct LedgerRow: Identifiable {
     let transactions: [Transaction]
     let instrument: Instrument?
     let latestTimestamp: Date
+    let openingTimestamp: Date
     let isOptionGroup: Bool
     let isEquityGroup: Bool
 
@@ -419,6 +420,7 @@ struct LedgerRow: Identifiable {
             transactions: [transaction],
             instrument: instrument,
             latestTimestamp: transaction.timestamp,
+            openingTimestamp: transaction.timestamp,
             isOptionGroup: instrument?.type == .option,
             isEquityGroup: instrument?.type == .equity
         )
@@ -426,6 +428,8 @@ struct LedgerRow: Identifiable {
 
     static func optionGroup(transactions: [Transaction], instrument: Instrument?) -> LedgerRow {
         let latest = transactions.map(\.timestamp).max() ?? Date.distantPast
+        let openingTxns = transactions.filter { $0.action == .buyToOpen || $0.action == .sellToOpen }
+        let opening = openingTxns.map(\.timestamp).min() ?? transactions.map(\.timestamp).min() ?? Date.distantPast
         let keyInstrument = transactions.first?.instrumentId.uuidString ?? UUID().uuidString
         return LedgerRow(
             id: keyInstrument,
@@ -433,6 +437,7 @@ struct LedgerRow: Identifiable {
             transactions: transactions,
             instrument: instrument,
             latestTimestamp: latest,
+            openingTimestamp: opening,
             isOptionGroup: true,
             isEquityGroup: false
         )
@@ -440,6 +445,8 @@ struct LedgerRow: Identifiable {
 
     static func equityGroup(transactions: [Transaction], instrument: Instrument?) -> LedgerRow {
         let latest = transactions.map(\.timestamp).max() ?? Date.distantPast
+        let openingTxns = transactions.filter { $0.action == .buy }
+        let opening = openingTxns.map(\.timestamp).min() ?? transactions.map(\.timestamp).min() ?? Date.distantPast
         let keyInstrument = transactions.first?.instrumentId.uuidString ?? UUID().uuidString
         return LedgerRow(
             id: "equity-\(keyInstrument)",
@@ -447,6 +454,7 @@ struct LedgerRow: Identifiable {
             transactions: transactions,
             instrument: instrument,
             latestTimestamp: latest,
+            openingTimestamp: opening,
             isOptionGroup: false,
             isEquityGroup: true
         )
