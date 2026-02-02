@@ -94,20 +94,6 @@ struct UnderlierDetailView: View {
                     }
                 }
             }
-
-            // Recent Transactions Section
-            if !relatedTransactions.isEmpty {
-                Section("Recent Transactions") {
-                    ForEach(relatedTransactions.prefix(10)) { txn in
-                        TransactionDetailRow(
-                            row: LedgerRow.single(
-                                transaction: txn,
-                                instrument: dataStore.instruments[txn.instrumentId]
-                            )
-                        )
-                    }
-                }
-            }
         }
         .navigationTitle(summary.symbol)
         .navigationBarTitleDisplayMode(.large)

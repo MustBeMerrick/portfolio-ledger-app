@@ -8,7 +8,7 @@ struct ClosePositionView: View {
     let instrument: Instrument
 
     @State private var closingPrice: String = ""
-    @State private var fees: String = "0"
+    @State private var fees: String = ""
     @State private var closeDate: Date = Date()
     @State private var notes: String = ""
 
