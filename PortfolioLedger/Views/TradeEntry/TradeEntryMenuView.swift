@@ -2,24 +2,22 @@ import SwiftUI
 
 struct TradeEntryMenuView: View {
     @Environment(\.dismiss) var dismiss
+    @Binding var selectedTab: Int
+    @Binding var isPresented: Bool
 
     var body: some View {
         NavigationView {
             List {
-                Section("Equity") {
-                    NavigationLink {
-                        AddEquityTradeView()
-                    } label: {
-                        Label("Buy/Sell Stock", systemImage: "chart.line.uptrend.xyaxis")
-                    }
+                NavigationLink {
+                    AddEquityTradeView(selectedTab: $selectedTab, isPresented: $isPresented)
+                } label: {
+                    Label("Buy/Sell Stock", systemImage: "chart.line.uptrend.xyaxis")
                 }
 
-                Section("Options") {
-                    NavigationLink {
-                        AddOptionTradeView()
-                    } label: {
-                        Label("Option Trade", systemImage: "list.bullet.rectangle")
-                    }
+                NavigationLink {
+                    AddOptionTradeView(selectedTab: $selectedTab, isPresented: $isPresented)
+                } label: {
+                    Label("Option Trade", systemImage: "list.bullet.rectangle")
                 }
             }
             .navigationTitle("Add Trade")
@@ -37,6 +35,6 @@ struct TradeEntryMenuView: View {
 
 struct TradeEntryMenuView_Previews: PreviewProvider {
     static var previews: some View {
-        TradeEntryMenuView()
+        TradeEntryMenuView(selectedTab: .constant(0), isPresented: .constant(true))
     }
 }

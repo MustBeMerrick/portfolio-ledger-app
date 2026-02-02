@@ -3,12 +3,14 @@ import SwiftUI
 struct AddEquityTradeView: View {
     @EnvironmentObject var dataStore: DataStore
     @Environment(\.dismiss) var dismiss
+    @Binding var selectedTab: Int
+    @Binding var isPresented: Bool
 
     @State private var symbol: String = ""
     @State private var action: TransactionAction = .buy
     @State private var quantity: String = ""
     @State private var price: String = ""
-    @State private var fees: String = "0"
+    @State private var fees: String = ""
     @State private var notes: String = ""
     @State private var tradeDate: Date = Date()
 
@@ -92,13 +94,14 @@ struct AddEquityTradeView: View {
         )
 
         dataStore.addTransaction(transaction)
-        dismiss()
+        selectedTab = 1
+        isPresented = false
     }
 }
 
 struct AddEquityTradeView_Previews: PreviewProvider {
     static var previews: some View {
-        AddEquityTradeView()
+        AddEquityTradeView(selectedTab: .constant(0), isPresented: .constant(true))
             .environmentObject(DataStore.shared)
     }
 }

@@ -116,7 +116,6 @@ class LedgerEngine {
         }
 
         var remainingToSell = txn.quantity
-        let proceeds = txn.netAmount
         let pricePerShare = txn.price
 
         for i in 0..<instrumentLots.count {

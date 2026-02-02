@@ -3,6 +3,8 @@ import SwiftUI
 struct AddOptionTradeView: View {
     @EnvironmentObject var dataStore: DataStore
     @Environment(\.dismiss) var dismiss
+    @Binding var selectedTab: Int
+    @Binding var isPresented: Bool
 
     @State private var underlyingSymbol: String = ""
     @State private var action: TransactionAction = .sellToOpen
@@ -11,7 +13,7 @@ struct AddOptionTradeView: View {
     @State private var expiry: Date = Date().addingTimeInterval(30 * 86400) // 30 days from now
     @State private var quantity: String = ""
     @State private var premium: String = ""
-    @State private var fees: String = "0"
+    @State private var fees: String = ""
     @State private var notes: String = ""
     @State private var tradeDate: Date = Date()
 
@@ -22,8 +24,6 @@ struct AddOptionTradeView: View {
                     Picker("Action", selection: $action) {
                         Text("Sell to Open").tag(TransactionAction.sellToOpen)
                         Text("Buy to Open").tag(TransactionAction.buyToOpen)
-                        Text("Buy to Close").tag(TransactionAction.buyToClose)
-                        Text("Sell to Close").tag(TransactionAction.sellToClose)
                     }
 
                     TextField("Underlying Symbol", text: $underlyingSymbol)
@@ -116,13 +116,14 @@ struct AddOptionTradeView: View {
         )
 
         dataStore.addTransaction(transaction)
-        dismiss()
+        selectedTab = 1
+        isPresented = false
     }
 }
 
 struct AddOptionTradeView_Previews: PreviewProvider {
     static var previews: some View {
-        AddOptionTradeView()
+        AddOptionTradeView(selectedTab: .constant(0), isPresented: .constant(true))
             .environmentObject(DataStore.shared)
     }
 }

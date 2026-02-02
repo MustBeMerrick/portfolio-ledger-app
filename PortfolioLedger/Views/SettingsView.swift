@@ -30,7 +30,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Link("GitHub Repository", destination: URL(string: "https://github.com")!)
+                    Link("GitHub Repository", destination: URL(string: "https://github.com/MustBeMerrick/portfolio-ledger-app")!)
                 }
             }
             .navigationTitle("Settings")

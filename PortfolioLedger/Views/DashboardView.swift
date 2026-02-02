@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var dataStore: DataStore
+    @Binding var selectedTab: Int
     @State private var showingTradeEntry = false
 
     var body: some View {
@@ -12,12 +13,7 @@ struct DashboardView: View {
                     PLSummaryCard(plSummary: dataStore.ledgerOutput.plSummary)
 
                     // Open Positions Summary
-                    OpenPositionsSummary(positions: dataStore.ledgerOutput.positions)
-
-                    // Recent Activity
-                    RecentActivityCard(
-                        transactions: Array(dataStore.transactions.prefix(5))
-                    )
+                    OpenPositionsSummary(positions: dataStore.ledgerOutput.positions, selectedTab: $selectedTab)
                 }
                 .padding()
             }
@@ -33,7 +29,7 @@ struct DashboardView: View {
                 }
             }
             .sheet(isPresented: $showingTradeEntry) {
-                TradeEntryMenuView()
+                TradeEntryMenuView(selectedTab: $selectedTab, isPresented: $showingTradeEntry)
             }
         }
     }
@@ -90,6 +86,7 @@ struct PLSummaryCard: View {
 struct OpenPositionsSummary: View {
     @EnvironmentObject var dataStore: DataStore
     let positions: [Position]
+    @Binding var selectedTab: Int
 
     var openPositions: [Position] {
         positions.filter { $0.isOpen }
@@ -122,7 +119,7 @@ struct OpenPositionsSummary: View {
 
                 if openPositions.count > 5 {
                     NavigationLink("View All") {
-                        PositionsView()
+                        PositionsView(selectedTab: $selectedTab)
                     }
                     .font(.subheadline)
                     .padding(.top, 4)
@@ -173,64 +170,10 @@ struct PositionRowCompact: View {
     }
 }
 
-struct RecentActivityCard: View {
-    let transactions: [Transaction]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Activity")
-                .font(.headline)
-
-            if transactions.isEmpty {
-                Text("No transactions yet")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 20)
-            } else {
-                ForEach(transactions) { txn in
-                    TransactionRowCompact(transaction: txn)
-                }
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-    }
-}
-
-struct TransactionRowCompact: View {
-    let transaction: Transaction
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(transaction.action.rawValue.uppercased())
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(transaction.action.isBuy ? .blue : .orange)
-                Text(transaction.timestamp, style: .date)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing) {
-                Text("\(transaction.quantity.description)")
-                    .font(.subheadline)
-                Text("@ \(transaction.price.description)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
 
 struct DashboardView_Previews: PreviewProvider {
     static var previews: some View {
-        DashboardView()
+        DashboardView(selectedTab: .constant(0))
             .environmentObject(DataStore.shared)
     }
 }

@@ -2,12 +2,23 @@ import SwiftUI
 
 struct PositionsView: View {
     @EnvironmentObject var dataStore: DataStore
+    @Binding var selectedTab: Int
     @State private var showingTradeEntry = false
+
+    private func latestTransactionDate(for symbol: String) -> Date {
+        let relatedTransactions = dataStore.transactions.filter { txn in
+            guard let instrument = dataStore.instruments[txn.instrumentId] else { return false }
+            return instrument.symbol == symbol
+        }
+        return relatedTransactions.map { $0.timestamp }.max() ?? Date.distantPast
+    }
 
     var body: some View {
         NavigationView {
             List {
-                ForEach(Array(dataStore.ledgerOutput.underlierSummaries.values.sorted(by: { $0.symbol < $1.symbol }))) { summary in
+                ForEach(Array(dataStore.ledgerOutput.underlierSummaries.values.sorted(by: {
+                    latestTransactionDate(for: $0.symbol) > latestTransactionDate(for: $1.symbol)
+                }))) { summary in
                     NavigationLink {
                         UnderlierDetailView(summary: summary)
                     } label: {
@@ -26,7 +37,7 @@ struct PositionsView: View {
                 }
             }
             .sheet(isPresented: $showingTradeEntry) {
-                TradeEntryMenuView()
+                TradeEntryMenuView(selectedTab: $selectedTab, isPresented: $showingTradeEntry)
             }
         }
     }
@@ -83,7 +94,7 @@ struct UnderlierSummaryRow: View {
 
 struct PositionsView_Previews: PreviewProvider {
     static var previews: some View {
-        PositionsView()
+        PositionsView(selectedTab: .constant(1))
             .environmentObject(DataStore.shared)
     }
 }

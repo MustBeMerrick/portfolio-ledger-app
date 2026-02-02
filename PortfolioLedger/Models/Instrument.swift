@@ -66,7 +66,7 @@ struct Instrument: Identifiable, Codable, Hashable {
                 return "Invalid Option"
             }
             let formatter = DateFormatter()
-            formatter.dateFormat = "MMddyy"
+            formatter.dateFormat = "MM/dd/yy"
             let expStr = formatter.string(from: exp)
             let cpStr = cp == .call ? "C" : "P"
             return "\(underlying) \(expStr) \(stk)\(cpStr)"
