@@ -48,7 +48,13 @@ Ready to code? Follow these steps:
    git clone https://github.com/yourusername/portfolio-ledger-app.git
    cd portfolio-ledger-app
    ```
-3. Create a branch:
+3. Set your development team in `Config/Local.xcconfig` (git-ignored):
+   ```
+   LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+   ```
+   Never change signing via Xcode's UI — it modifies the project file.
+   See SETUP.md for details.
+4. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
    ```

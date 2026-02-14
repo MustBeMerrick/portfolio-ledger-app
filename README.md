@@ -160,7 +160,8 @@ The option position is closed, and the premium is marked as consumed. The genera
      ```
      LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
      ```
-   - Or use Xcode's automatic signing (see SETUP.md)
+   - Find your Team ID in Xcode → Settings → Accounts (10-char string)
+   - **Do not** use Xcode's Signing & Capabilities UI — see SETUP.md
 
 3. Open in Xcode:
    ```bash

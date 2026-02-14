@@ -20,7 +20,11 @@ Get Portfolio Ledger running in under 5 minutes.
    # Edit Config/Local.xcconfig and add your team ID:
    echo "LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID" > Config/Local.xcconfig
    ```
-   Find your Team ID in Xcode → Settings → Accounts
+   Find your Team ID (a 10-character string like `A1B2C3D4E5`) in
+   Xcode → Settings → Accounts, or at developer.apple.com/account.
+
+   > **Do not** change signing in Xcode's "Signing & Capabilities" UI —
+   > it writes into the project file and creates unwanted diffs.
 
 3. **Open and run**
    ```bash

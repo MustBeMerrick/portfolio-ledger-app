@@ -12,8 +12,15 @@ Do **not** create a new Xcode project — just open the existing one.
      ```
      LOCAL_DEVELOPMENT_TEAM = YOUR_TEAM_ID
      ```
-   - Find your Team ID in Xcode → Settings → Accounts → View Details
-   - Or leave it blank and use Xcode's manual signing (see below)
+   - Find your Team ID in Xcode → Settings → Accounts, or at
+     https://developer.apple.com/account under Membership Details.
+     It is a 10-character alphanumeric string (e.g. `A1B2C3D4E5`).
+
+   > **Important:** Do NOT change signing settings through Xcode's
+   > "Signing & Capabilities" UI. The Xcode GUI writes `DEVELOPMENT_TEAM`
+   > directly into the `.pbxproj` file, which overrides the xcconfig value
+   > and creates a diff in version control. Always set your team via
+   > `Local.xcconfig` only.
 
 3. Open the existing project:
    ```bash
@@ -122,10 +129,8 @@ If you see compilation errors:
 
 1. Connect your iPhone/iPad via USB
 2. Select your device in Xcode
-3. If you see "Signing" errors:
-   - Go to target → Signing & Capabilities
-   - Select your Team
-   - Xcode will automatically fix signing
+3. If you see "Signing" errors, verify your `Config/Local.xcconfig`
+   contains the correct Team ID — do not use the Xcode Signing UI.
 4. Press Cmd+R to run
 
 ### Testing Data Entry
