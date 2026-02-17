@@ -16,7 +16,12 @@ let package = Package(
     targets: [
         .target(
             name: "PortfolioLedger",
-            path: "PortfolioLedger"
+            path: "PortfolioLedger",
+            sources: ["Engine", "Models", "Services"]
+        ),
+        .testTarget(
+            name: "PortfolioLedgerTests",
+            dependencies: ["PortfolioLedger"]
         )
     ]
 )
