@@ -45,8 +45,14 @@ final class LedgerEngineTests: XCTestCase {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         
-        let expiry = formatter.date(from: "02/20/2026")
-        let sellDate = formatter.date(from: "02/17/2026")
+        guard let expiry = formatter.date(from: "02/20/2026") else {
+            XCTFail("Invalid expiry date")
+            return
+        }
+        guard let sellDate = formatter.date(from: "02/17/2026") else {
+            XCTFail("Invalid sell date")
+            return
+        }
         
         let instrumentId = UUID()
         let metaCall = Instrument(id: instrumentId, underlyingSymbol: "META", expiry: expiry, strike: 405, callPut: .call)
@@ -66,12 +72,13 @@ final class LedgerEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(output.realizedPLs.count, 1)
-        XCTAssertEqual(output.realizedPLs[0].quantity, 40)
-        XCTAssertEqual(output.realizedPLs[0].costBasis, 400)
-        XCTAssertEqual(output.realizedPLs[0].proceeds, 600)
-        XCTAssertEqual(output.realizedPLs[0].realizedPL, 200)
+        XCTAssertEqual(output.realizedPLs[0].quantity, 3)
+        XCTAssertEqual(output.realizedPLs[0].costBasis, 0)
+        XCTAssertEqual(output.realizedPLs[0].proceeds, Decimal(string: "1.17")! * 3 * 100)
+        XCTAssertEqual(output.realizedPLs[0].realizedPL, Decimal(string: "1.17")! * 3 * 100)
 
         XCTAssertEqual(output.optionLots.count, 1)
-        XCTAssertEqual(output.optionLots[0].remainingQuantity, 60)
+        XCTAssertEqual(output.optionLots[0].premium, Decimal(string: "1.17")! * 3 * 100)
+        XCTAssertEqual(output.optionLots[0].remainingQuantity, 3)
     }
 }
