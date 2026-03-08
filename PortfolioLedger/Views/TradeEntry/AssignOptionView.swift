@@ -103,15 +103,17 @@ struct AssignOptionView: View {
         let equityInstrument = dataStore.getOrCreateInstrument(symbol: underlyingSymbol)
 
         // Generate assignment transactions
-        let (optionClose, equityTrade) = LedgerEngine.generateAssignmentTransactions(
+        guard let generated = try? LedgerEngine.generateAssignmentTransactions(
             optionTransaction: optionTransaction,
             instrument: optionInstrument,
             assignmentDate: assignmentDate,
             equityInstrument: equityInstrument
-        )
+        ) else {
+            return
+        }
 
         // Add both transactions
-        dataStore.addTransactions([optionClose, equityTrade])
+        dataStore.addTransactions([generated.optionClose, generated.equityTrade])
 
         dismiss()
     }
