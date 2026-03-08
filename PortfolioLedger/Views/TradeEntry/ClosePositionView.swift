@@ -6,21 +6,34 @@ struct ClosePositionView: View {
 
     let position: Position
     let instrument: Instrument
+    let closeQuantity: Decimal
 
     @State private var closingPrice: String = ""
     @State private var fees: String = ""
     @State private var closeDate: Date = Date()
     @State private var notes: String = ""
+    @State private var selectedOptionAction: TransactionAction
+
+    init(position: Position, instrument: Instrument, closeQuantity: Decimal? = nil) {
+        self.position = position
+        self.instrument = instrument
+        self.closeQuantity = closeQuantity ?? abs(position.quantity)
+        // Default option closing action based on position side
+        let defaultAction: TransactionAction = position.quantity < 0 ? .buyToClose : .sellToClose
+        _selectedOptionAction = State(initialValue: defaultAction)
+    }
 
     var closingAction: TransactionAction {
         if instrument.type == .option {
-            // If position quantity is negative, we're short (sold to open), so we buy to close
-            // If position quantity is positive, we're long (bought to open), so we sell to close
-            return position.quantity < 0 ? .buyToClose : .sellToClose
+            return selectedOptionAction
         }
-
         // Equity: sell to close a long, buy to close a short
         return position.quantity < 0 ? .buy : .sell
+    }
+
+    private var optionClosingActions: [TransactionAction] {
+        let marketClose: TransactionAction = position.quantity < 0 ? .buyToClose : .sellToClose
+        return [marketClose, .expire, .assign]
     }
 
     var body: some View {
@@ -33,7 +46,7 @@ struct ClosePositionView: View {
                     HStack {
                         Text("Quantity:")
                         Spacer()
-                        Text(abs(position.quantity).description)
+                        Text(closeQuantity.description)
                             .fontWeight(.medium)
                     }
 
@@ -47,20 +60,32 @@ struct ClosePositionView: View {
                 }
 
                 Section("Close Details") {
-                    HStack {
-                        Text("Action:")
-                        Spacer()
-                        Text(actionLabel)
-                            .fontWeight(.medium)
+                    if instrument.type == .option {
+                        Picker("Action", selection: $selectedOptionAction) {
+                            ForEach(optionClosingActions, id: \.self) { action in
+                                Text(labelFor(action)).tag(action)
+                            }
+                        }
+                    } else {
+                        HStack {
+                            Text("Action:")
+                            Spacer()
+                            Text(actionLabel)
+                                .fontWeight(.medium)
+                        }
                     }
 
-                    TextField(priceFieldLabel, text: $closingPrice)
-                        .keyboardType(.decimalPad)
+                    if closingAction != .expire && closingAction != .assign {
+                        TextField(priceFieldLabel, text: $closingPrice)
+                            .keyboardType(.decimalPad)
 
-                    TextField("Fees", text: $fees)
-                        .keyboardType(.decimalPad)
+                        TextField("Fees", text: $fees)
+                            .keyboardType(.decimalPad)
+                    }
 
-                    DatePicker("Close Date", selection: $closeDate, displayedComponents: [.date, .hourAndMinute])
+                    if closingAction != .expire && closingAction != .assign {
+                        DatePicker("Close Date", selection: $closeDate, displayedComponents: [.date, .hourAndMinute])
+                    }
                 }
 
                 Section("Notes") {
@@ -90,17 +115,31 @@ struct ClosePositionView: View {
     }
 
     private func closePosition() {
-        guard let price = Decimal(string: closingPrice), price >= 0 else {
-            return
+        let action = closingAction
+        let price: Decimal
+        let feeAmount: Decimal
+
+        let closeTimestamp: Date
+        if action == .expire || action == .assign {
+            // Expire and assign always close at $0 with no fees, at the option's expiry date
+            price = 0
+            feeAmount = 0
+            closeTimestamp = instrument.expiry ?? closeDate
+        } else {
+            guard let parsedPrice = Decimal(string: closingPrice), parsedPrice >= 0 else {
+                return
+            }
+            price = parsedPrice
+            feeAmount = Decimal(string: fees) ?? 0
+            closeTimestamp = closeDate
         }
 
-        let feeAmount = Decimal(string: fees) ?? 0
-        let quantity = abs(position.quantity)
+        let quantity = closeQuantity
 
         let transaction = Transaction(
             instrumentId: position.instrumentId,
-            timestamp: closeDate,
-            action: closingAction,
+            timestamp: closeTimestamp,
+            action: action,
             quantity: quantity,
             price: price,
             fees: feeAmount,
@@ -113,17 +152,18 @@ struct ClosePositionView: View {
     }
 
     private var actionLabel: String {
-        switch closingAction {
-        case .buyToClose:
-            return "Buy to Close"
-        case .sellToClose:
-            return "Sell to Close"
-        case .buy:
-            return "Buy"
-        case .sell:
-            return "Sell"
-        default:
-            return closingAction.rawValue.uppercased()
+        labelFor(closingAction)
+    }
+
+    private func labelFor(_ action: TransactionAction) -> String {
+        switch action {
+        case .buyToClose:   return "Buy to Close"
+        case .sellToClose:  return "Sell to Close"
+        case .expire:       return "Expire (OTM)"
+        case .assign:       return "Assign (ITM)"
+        case .buy:          return "Buy"
+        case .sell:         return "Sell"
+        default:            return action.rawValue.uppercased()
         }
     }
 

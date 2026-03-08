@@ -39,8 +39,10 @@ class LedgerEngine {
                 processOptionTransaction(
                     txn: txn,
                     lots: &optionLots,
+                    equityLots: &equityLots,
                     output: &output,
-                    instrument: instrument
+                    instrument: instrument,
+                    instruments: instruments
                 )
             }
         }
@@ -162,8 +164,10 @@ class LedgerEngine {
     private static func processOptionTransaction(
         txn: Transaction,
         lots: inout [UUID: [OptionLot]],
+        equityLots: inout [UUID: [EquityLot]],
         output: inout LedgerOutput,
-        instrument: Instrument
+        instrument: Instrument,
+        instruments: [UUID: Instrument]
     ) {
         let multiplier = Decimal(instrument.multiplier ?? 100)
         let scaledNetAmount = txn.netAmount * multiplier
@@ -215,9 +219,143 @@ class LedgerEngine {
                 instrument: instrument
             )
 
+        case .expire:
+            // Option expired out-of-the-money: close lot(s) with $0 additional P/L
+            expireOptionLots(txn: txn, lots: &lots, output: &output)
+
+        case .assign:
+            // Option assigned at expiry: close lot(s) and auto-generate equity transaction
+            assignOptionLots(
+                txn: txn,
+                lots: &lots,
+                equityLots: &equityLots,
+                output: &output,
+                instrument: instrument,
+                instruments: instruments
+            )
+
         default:
             break
         }
+    }
+
+    private static func expireOptionLots(
+        txn: Transaction,
+        lots: inout [UUID: [OptionLot]],
+        output: inout LedgerOutput
+    ) {
+        guard var instrumentLots = lots[txn.instrumentId] else { return }
+
+        var remainingToClose = txn.quantity
+
+        for i in 0..<instrumentLots.count {
+            guard remainingToClose > 0 else { break }
+
+            var lot = instrumentLots[i]
+            guard lot.isOpen else { continue }
+
+            let quantityToConsume = min(lot.remainingQuantity, remainingToClose)
+
+            // Record $0 P/L — premium was already captured at open (cash basis)
+            let plRecord = RealizedPL(
+                instrumentId: txn.instrumentId,
+                closeDate: txn.timestamp,
+                openDate: lot.openDate,
+                quantity: quantityToConsume,
+                proceeds: 0,
+                costBasis: 0,
+                realizedPL: 0,
+                transactionId: txn.id,
+                openTransactionId: lot.transactionId
+            )
+            output.realizedPLs.append(plRecord)
+
+            lot.remainingQuantity -= quantityToConsume
+            instrumentLots[i] = lot
+            remainingToClose -= quantityToConsume
+        }
+
+        lots[txn.instrumentId] = instrumentLots
+    }
+
+    private static func assignOptionLots(
+        txn: Transaction,
+        lots: inout [UUID: [OptionLot]],
+        equityLots: inout [UUID: [EquityLot]],
+        output: inout LedgerOutput,
+        instrument: Instrument,
+        instruments: [UUID: Instrument]
+    ) {
+        guard var instrumentLots = lots[txn.instrumentId],
+              let strike = instrument.strike,
+              let callPut = instrument.callPut,
+              let multiplier = instrument.multiplier else { return }
+
+        let underlyingSymbol = instrument.underlyingTicker
+        let equityId = instruments.first(where: {
+            $0.value.type == .equity && $0.value.symbol == underlyingSymbol
+        })?.key
+
+        var remainingToClose = txn.quantity
+
+        for i in 0..<instrumentLots.count {
+            guard remainingToClose > 0 else { break }
+
+            var lot = instrumentLots[i]
+            guard lot.isOpen else { continue }
+
+            let quantityToConsume = min(lot.remainingQuantity, remainingToClose)
+
+            // Record $0 P/L for the option leg — premium captured at open
+            let plRecord = RealizedPL(
+                instrumentId: txn.instrumentId,
+                closeDate: txn.timestamp,
+                openDate: lot.openDate,
+                quantity: quantityToConsume,
+                proceeds: 0,
+                costBasis: 0,
+                realizedPL: 0,
+                transactionId: txn.id,
+                openTransactionId: lot.transactionId
+            )
+            output.realizedPLs.append(plRecord)
+
+            // Auto-generate and process the equity leg if the instrument is known
+            if let equityId {
+                // Determine equity direction from lot side + option type:
+                //   Short put assigned  → buy equity (must buy at strike)
+                //   Short call assigned → sell equity (shares called away)
+                //   Long put exercised  → sell equity (exercise right to sell)
+                //   Long call exercised → buy equity (exercise right to buy)
+                let equityAction: TransactionAction
+                if lot.isShort {
+                    equityAction = (callPut == .put) ? .buy : .sell
+                } else {
+                    equityAction = (callPut == .call) ? .buy : .sell
+                }
+
+                let shareQuantity = quantityToConsume * Decimal(multiplier)
+                let equityTxn = Transaction(
+                    instrumentId: equityId,
+                    timestamp: txn.timestamp,
+                    action: equityAction,
+                    quantity: shareQuantity,
+                    price: strike,
+                    fees: 0,
+                    notes: "Option assignment",
+                    tags: ["assignment"],
+                    linkGroupId: txn.linkGroupId
+                )
+                output.syntheticTransactions.append(equityTxn)
+                processEquityTransaction(txn: equityTxn, lots: &equityLots, output: &output)
+            }
+
+            lot.remainingQuantity -= quantityToConsume
+            instrumentLots[i] = lot
+            remainingToClose -= quantityToConsume
+        }
+
+        lots[txn.instrumentId] = instrumentLots
     }
 
     private static func consumeOptionLots(

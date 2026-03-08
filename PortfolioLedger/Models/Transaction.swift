@@ -11,6 +11,11 @@ enum TransactionAction: String, Codable {
     case sellToOpen = "sell_to_open"
     case buyToClose = "buy_to_close"
     case sellToClose = "sell_to_close"
+    /// Option expired out-of-the-money at expiry (no equity transaction generated)
+    case expire = "expire"
+    /// Option was in-the-money at expiry and assigned; engine automatically
+    /// creates or closes the corresponding equity position at the strike price
+    case assign = "assign"
 
     var isEquity: Bool {
         self == .buy || self == .sell
@@ -25,7 +30,7 @@ enum TransactionAction: String, Codable {
     }
 
     var isClosing: Bool {
-        self == .sell || self == .buyToClose || self == .sellToClose
+        self == .sell || self == .buyToClose || self == .sellToClose || self == .expire || self == .assign
     }
 
     var isBuy: Bool {
