@@ -1692,4 +1692,532 @@ final class LedgerEngineTests: XCTestCase {
         XCTAssertEqual(output.optionLots.count, 1)
         XCTAssertEqual(output.optionLots[0].remainingQuantity, 0)
     }
+
+    // MARK: - Expire Tests
+
+    func testShortOptionExpireClosesLotWithZeroPL() {
+        let instrumentId = UUID()
+        let option = Instrument(
+            id: instrumentId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 200,
+            callPut: .put
+        )
+
+        // Sell to open: premium captured immediately (+$100)
+        let sellToOpen = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        // Option expires OTM: no additional P/L
+        let expire = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .expire,
+            quantity: 1,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [sellToOpen, expire],
+            instruments: [instrumentId: option]
+        )
+
+        // STO P/L: +$100; expire P/L: $0
+        XCTAssertEqual(output.realizedPLs.count, 2)
+        XCTAssertEqual(output.realizedPLs[0].realizedPL, 100)
+        XCTAssertEqual(output.realizedPLs[1].realizedPL, 0)
+        XCTAssertEqual(output.plSummary.totalRealizedPL, 100)
+
+        XCTAssertEqual(output.optionLots.count, 1)
+        XCTAssertEqual(output.optionLots[0].remainingQuantity, 0)
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // No equity position created
+        XCTAssertEqual(output.positions.filter { $0.type == .equity }.count, 0)
+    }
+
+    func testLongOptionExpireClosesLotWithZeroPL() {
+        let instrumentId = UUID()
+        let option = Instrument(
+            id: instrumentId,
+            underlyingSymbol: "MSFT",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 400,
+            callPut: .call
+        )
+
+        let buyToOpen = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buyToOpen,
+            quantity: 2,
+            price: Decimal(string: "1.50")!,
+            fees: 0
+        )
+
+        let expire = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .expire,
+            quantity: 2,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buyToOpen, expire],
+            instruments: [instrumentId: option]
+        )
+
+        // BTO P/L: -$300; expire P/L: $0; net: -$300 (lost the premium)
+        XCTAssertEqual(output.realizedPLs.count, 2)
+        XCTAssertEqual(output.realizedPLs[0].realizedPL, -300)
+        XCTAssertEqual(output.realizedPLs[1].realizedPL, 0)
+        XCTAssertEqual(output.plSummary.totalRealizedPL, -300)
+
+        XCTAssertFalse(output.optionLots[0].isOpen)
+        XCTAssertEqual(output.positions.filter { $0.type == .equity }.count, 0)
+    }
+
+    func testExpirePartiallyClosesMultipleContracts() {
+        let instrumentId = UUID()
+        let option = Instrument(
+            id: instrumentId,
+            underlyingSymbol: "TSLA",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 300,
+            callPut: .call
+        )
+
+        let sellToOpen = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 3,
+            price: Decimal(string: "2.00")!,
+            fees: 0
+        )
+
+        // Only 2 of 3 contracts expire (partial expiry)
+        let expire = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .expire,
+            quantity: 2,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [sellToOpen, expire],
+            instruments: [instrumentId: option]
+        )
+
+        XCTAssertEqual(output.optionLots.count, 1)
+        XCTAssertEqual(output.optionLots[0].remainingQuantity, 1)
+        XCTAssertTrue(output.optionLots[0].isOpen)
+    }
+
+    // MARK: - Assign Tests
+
+    func testShortPutAssignedAutoBuysEquityAtStrike() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 150,
+            callPut: .put
+        )
+        let aapl = Instrument(id: equityId, symbol: "AAPL")
+
+        // STO put: premium received +$200 (2 * $1.00 * 100)
+        let sellToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 2,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        // Put assigned: must buy 200 shares at $150 strike
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 2,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [sellToOpen, assign],
+            instruments: [optionId: putOption, equityId: aapl]
+        )
+
+        // Option lot closed
+        XCTAssertEqual(output.optionLots.count, 1)
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // Equity position created: 200 shares @ $150
+        let equityPos = output.positions.first { $0.type == .equity }
+        XCTAssertNotNil(equityPos)
+        XCTAssertEqual(equityPos?.quantity, 200)   // 2 contracts * 100 multiplier
+        XCTAssertEqual(equityPos?.costBasis, 30000) // 200 * $150
+
+        // P/L: STO +$200, assign option leg $0
+        XCTAssertEqual(output.realizedPLs[0].realizedPL, 200)
+        XCTAssertEqual(output.realizedPLs[1].realizedPL, 0)
+        XCTAssertEqual(output.plSummary.optionRealizedPL, 200)
+    }
+
+    func testShortCallAssignedAutoSellsEquityAtStrike() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let callOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "MSFT",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 400,
+            callPut: .call
+        )
+        let msft = Instrument(id: equityId, symbol: "MSFT")
+
+        // Buy 100 shares @ $350 first (covered call position)
+        let equityBuy = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 100,
+            price: 350,
+            fees: 0
+        )
+
+        // STO call: premium received +$50 (1 * $0.50 * 100)
+        let sellToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "0.50")!,
+            fees: 0
+        )
+
+        // Call assigned: 100 shares sold at $400 strike
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 1,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [equityBuy, sellToOpen, assign],
+            instruments: [optionId: callOption, equityId: msft]
+        )
+
+        // Option lot closed
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // Equity lot consumed (shares called away)
+        XCTAssertFalse(output.equityLots[0].isOpen)
+
+        // Equity sell P/L: 100 * ($400 - $350) = $5,000
+        let equityRealizedPL = output.realizedPLs.filter { $0.instrumentId == equityId }
+        XCTAssertEqual(equityRealizedPL.first?.realizedPL, 5000)  // 100 * (400 - 350)
+
+        // Option P/L: +$50 (STO) + $0 (assign leg)
+        XCTAssertEqual(output.plSummary.optionRealizedPL, 50)
+        XCTAssertEqual(output.plSummary.equityRealizedPL, 5000)
+        XCTAssertEqual(output.plSummary.totalRealizedPL, 5050)
+
+        // No open equity position remains
+        XCTAssertTrue(output.positions.filter { $0.type == .equity }.isEmpty)
+    }
+
+    func testLongPutExercisedAutoSellsEquityAtStrike() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 200,
+            callPut: .put
+        )
+        let aapl = Instrument(id: equityId, symbol: "AAPL")
+
+        // Buy 100 shares @ $210
+        let equityBuy = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 100,
+            price: 210,
+            fees: 0
+        )
+
+        // BTO put (protective put): premium paid -$100 (1 * $1.00 * 100)
+        let buyToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buyToOpen,
+            quantity: 1,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        // Exercise put: sell 100 shares at $200 strike
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 1,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [equityBuy, buyToOpen, assign],
+            instruments: [optionId: putOption, equityId: aapl]
+        )
+
+        // Option lot closed
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // Equity lot consumed (shares sold at strike)
+        XCTAssertFalse(output.equityLots[0].isOpen)
+
+        // Equity P/L: 100 * ($200 - $210) = -$1,000
+        let equityPLs = output.realizedPLs.filter { $0.instrumentId == equityId }
+        XCTAssertEqual(equityPLs.first?.realizedPL, -1000)
+
+        // Option P/L: -$100 (BTO) + $0 (assign leg) = -$100
+        XCTAssertEqual(output.plSummary.optionRealizedPL, -100)
+        XCTAssertEqual(output.plSummary.equityRealizedPL, -1000)
+        // Net: put protected from further loss (paid $100 premium to limit loss to $1,100 total)
+        XCTAssertEqual(output.plSummary.totalRealizedPL, -1100)
+    }
+
+    func testLongCallExercisedAutoBuysEquityAtStrike() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let callOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "TSLA",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 250,
+            callPut: .call
+        )
+        let tsla = Instrument(id: equityId, symbol: "TSLA")
+
+        // BTO call: premium paid -$200 (2 * $1.00 * 100)
+        let buyToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buyToOpen,
+            quantity: 2,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        // Exercise call: buy 200 shares at $250 strike
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 2,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buyToOpen, assign],
+            instruments: [optionId: callOption, equityId: tsla]
+        )
+
+        // Option lot closed
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // Equity position created: 200 shares @ $250
+        let equityPos = output.positions.first { $0.type == .equity }
+        XCTAssertNotNil(equityPos)
+        XCTAssertEqual(equityPos?.quantity, 200)
+        XCTAssertEqual(equityPos?.costBasis, 50000)  // 200 * $250
+    }
+
+    func testCallAssignmentWithMultipleEquityLotsConsumesFIFO() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let callOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 200,
+            callPut: .call
+        )
+        let aapl = Instrument(id: equityId, symbol: "AAPL")
+
+        // Buy lot 1: 50 shares @ $100
+        let buy1 = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 100,
+            fees: 0
+        )
+
+        // Buy lot 2: 50 shares @ $150
+        let buy2 = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 50,
+            price: 150,
+            fees: 0
+        )
+
+        // STO call covering all 100 shares (1 contract = 100 shares)
+        let sellToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_200),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "2.00")!,
+            fees: 0
+        )
+
+        // Call assigned: 100 shares called away at $200
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 1,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2, sellToOpen, assign],
+            instruments: [optionId: callOption, equityId: aapl]
+        )
+
+        // Both equity lots fully consumed (FIFO)
+        XCTAssertEqual(output.equityLots.count, 2)
+        XCTAssertFalse(output.equityLots[0].isOpen)
+        XCTAssertFalse(output.equityLots[1].isOpen)
+
+        // Two equity realized P/L entries (one per lot consumed)
+        let equityPLs = output.realizedPLs.filter { $0.instrumentId == equityId }
+        XCTAssertEqual(equityPLs.count, 2)
+        XCTAssertEqual(equityPLs[0].realizedPL, 5000)  // 50 * ($200 - $100)
+        XCTAssertEqual(equityPLs[1].realizedPL, 2500)  // 50 * ($200 - $150)
+
+        // No open equity position remains
+        XCTAssertTrue(output.positions.filter { $0.type == .equity }.isEmpty)
+    }
+
+    func testAssignWithNoEquityInstrumentClosesOptionLotOnly() {
+        // If the equity instrument isn't registered, the option lot is still closed
+        // but no equity transaction is generated
+        let optionId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 150,
+            callPut: .put
+        )
+
+        let sellToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 1,
+            price: 0,
+            fees: 0
+        )
+
+        // Only the option instrument is registered — no equity instrument
+        let output = LedgerEngine.process(
+            transactions: [sellToOpen, assign],
+            instruments: [optionId: putOption]
+        )
+
+        // Option lot is still closed
+        XCTAssertFalse(output.optionLots[0].isOpen)
+
+        // No equity lots or positions created
+        XCTAssertEqual(output.equityLots.count, 0)
+        XCTAssertTrue(output.positions.filter { $0.type == .equity }.isEmpty)
+    }
+
+    func testAssignLotIsClosedAfterAssignment() {
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "MSFT",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 300,
+            callPut: .put
+        )
+        let msft = Instrument(id: equityId, symbol: "MSFT")
+
+        let sellToOpen = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 3,
+            price: Decimal(string: "1.00")!,
+            fees: 0
+        )
+
+        let assign = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+            action: .assign,
+            quantity: 3,
+            price: 0,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [sellToOpen, assign],
+            instruments: [optionId: putOption, equityId: msft]
+        )
+
+        XCTAssertEqual(output.optionLots[0].remainingQuantity, 0)
+        XCTAssertFalse(output.optionLots[0].isOpen)
+        XCTAssertEqual(output.positions.filter { $0.type == .option }.count, 0)
+    }
 }

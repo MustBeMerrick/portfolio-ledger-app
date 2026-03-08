@@ -5,6 +5,22 @@ struct UnderlierDetailView: View {
     let summary: UnderlierSummary
     @State private var showingEquityCloseSheet = false
 
+    /// Shares locked as collateral for open short calls.
+    var collateralizedShares: Decimal {
+        summary.optionPositions.reduce(0) { total, position in
+            guard position.isOpen, position.quantity < 0,
+                  let instrument = dataStore.instruments[position.instrumentId],
+                  instrument.callPut == .call else { return total }
+            let multiplier = Decimal(instrument.multiplier ?? 100)
+            return total + (abs(position.quantity) * multiplier)
+        }
+    }
+
+    /// Shares available to close (not locked by a short call).
+    var freeEquityShares: Decimal {
+        max(0, summary.totalEquityShares - collateralizedShares)
+    }
+
     var relatedTransactions: [Transaction] {
         dataStore.transactions.filter { txn in
             guard let instrument = dataStore.instruments[txn.instrumentId] else { return false }
@@ -47,17 +63,32 @@ struct UnderlierDetailView: View {
 
                     HStack {
                         Spacer()
-                        Button {
-                            showingEquityCloseSheet = true
-                        } label: {
-                            Text("Close")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(6)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Button {
+                                showingEquityCloseSheet = true
+                            } label: {
+                                Text(freeEquityShares < summary.totalEquityShares && freeEquityShares > 0
+                                     ? "Close \(freeEquityShares.description) shares"
+                                     : "Close")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(freeEquityShares <= 0 ? Color.gray : Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(6)
+                            }
+                            .disabled(freeEquityShares <= 0)
+
+                            if freeEquityShares <= 0 {
+                                Text("Close short call first")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            } else if collateralizedShares > 0 {
+                                Text("\(collateralizedShares.description) shares collateralized")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
@@ -100,7 +131,11 @@ struct UnderlierDetailView: View {
         .sheet(isPresented: $showingEquityCloseSheet) {
             if let equityPos = summary.equityPosition,
                let instrument = dataStore.instruments[equityPos.instrumentId] {
-                ClosePositionView(position: equityPos, instrument: instrument)
+                ClosePositionView(
+                    position: equityPos,
+                    instrument: instrument,
+                    closeQuantity: freeEquityShares < summary.totalEquityShares ? freeEquityShares : nil
+                )
             }
         }
     }
