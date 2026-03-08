@@ -5,8 +5,12 @@ struct TransactionsView: View {
     @State private var searchText = ""
     @State private var filterSymbol: String?
 
+    private var allTransactions: [Transaction] {
+        dataStore.transactions + dataStore.ledgerOutput.syntheticTransactions
+    }
+
     private var filteredTransactions: [Transaction] {
-        var txns = dataStore.transactions
+        var txns = allTransactions
 
         if !searchText.isEmpty {
             txns = txns.filter { txn in
@@ -40,16 +44,20 @@ struct TransactionsView: View {
             }
         }
 
+        let allRealizedPLs = dataStore.ledgerOutput.realizedPLs
+
         for (_, txns) in optionGroups {
             guard let first = txns.first else { continue }
             let instrument = dataStore.instruments[first.instrumentId]
-            rows.append(LedgerRow.optionGroup(transactions: txns, instrument: instrument))
+            let pls = allRealizedPLs.filter { $0.instrumentId == first.instrumentId }
+            rows.append(LedgerRow.optionGroup(transactions: txns, instrument: instrument, realizedPLs: pls))
         }
 
         for (_, txns) in equityGroups {
             guard let first = txns.first else { continue }
             let instrument = dataStore.instruments[first.instrumentId]
-            rows.append(LedgerRow.equityGroup(transactions: txns, instrument: instrument))
+            let pls = allRealizedPLs.filter { $0.instrumentId == first.instrumentId }
+            rows.append(LedgerRow.equityGroup(transactions: txns, instrument: instrument, realizedPLs: pls))
         }
 
         return rows.sorted { $0.openingTimestamp > $1.openingTimestamp }
@@ -105,8 +113,16 @@ struct TransactionDetailRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                // Action badge (hidden for fully closed groups)
-                if !row.isClosed {
+                if row.isClosed {
+                    Text("Closed")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.15))
+                        .foregroundColor(.secondary)
+                        .cornerRadius(4)
+                } else {
                     Text(badgeText)
                         .font(.caption)
                         .fontWeight(.bold)
@@ -289,6 +305,10 @@ struct TransactionDetailRow: View {
             return .blue
         case .sell, .sellToOpen, .sellToClose:
             return .orange
+        case .expire:
+            return .gray
+        case .assign:
+            return .purple
         }
     }
 
@@ -299,9 +319,7 @@ struct TransactionDetailRow: View {
             }
         }
         if row.isEquityGroup {
-            if let sell = row.closingTransactions.first {
-                return sell.action
-            }
+            // Always show the opening action — the position was opened by buying
             if let buy = row.openingTransactions.first {
                 return buy.action
             }
@@ -328,7 +346,9 @@ struct TransactionDetailRow: View {
     }
 
     private var closeLabel: String {
-        row.closingTransactions.contains { $0.action == .buyToClose } ? "BTC" : "STC"
+        if row.closingTransactions.contains(where: { $0.action == .assign }) { return "ASSIGN" }
+        if row.closingTransactions.contains(where: { $0.action == .expire }) { return "EXPIRE" }
+        return row.closingTransactions.contains { $0.action == .buyToClose } ? "BTC" : "STC"
     }
 
     private var optionOpenPrice: Decimal {
@@ -358,19 +378,11 @@ struct TransactionDetailRow: View {
     }
 
     private var equityTotalPL: Decimal {
-        row.equityTransactions.reduce(0) { partial, txn in
-            let cashFlow = txn.action.isSell ? txn.netAmount : -txn.netAmount
-            return partial + cashFlow
-        }
+        row.realizedPLs.reduce(0) { $0 + $1.realizedPL }
     }
 
     private var optionTotalPL: Decimal {
-        guard let inst = row.instrument else { return 0 }
-        let multiplier = Decimal(inst.multiplier ?? 100)
-        return row.optionTransactions.reduce(0) { partial, txn in
-            let cashFlow = txn.action.isSell ? txn.netAmount : -txn.netAmount
-            return partial + (cashFlow * multiplier)
-        }
+        row.realizedPLs.reduce(0) { $0 + $1.realizedPL }
     }
 
     private func weightedAveragePrice(for txns: [Transaction]) -> Decimal {
@@ -412,8 +424,9 @@ struct LedgerRow: Identifiable {
     let openingTimestamp: Date
     let isOptionGroup: Bool
     let isEquityGroup: Bool
+    let realizedPLs: [RealizedPL]
 
-    static func single(transaction: Transaction, instrument: Instrument?) -> LedgerRow {
+    static func single(transaction: Transaction, instrument: Instrument?, realizedPLs: [RealizedPL] = []) -> LedgerRow {
         LedgerRow(
             id: transaction.id.uuidString,
             transaction: transaction,
@@ -422,11 +435,12 @@ struct LedgerRow: Identifiable {
             latestTimestamp: transaction.timestamp,
             openingTimestamp: transaction.timestamp,
             isOptionGroup: instrument?.type == .option,
-            isEquityGroup: instrument?.type == .equity
+            isEquityGroup: instrument?.type == .equity,
+            realizedPLs: realizedPLs
         )
     }
 
-    static func optionGroup(transactions: [Transaction], instrument: Instrument?) -> LedgerRow {
+    static func optionGroup(transactions: [Transaction], instrument: Instrument?, realizedPLs: [RealizedPL] = []) -> LedgerRow {
         let latest = transactions.map(\.timestamp).max() ?? Date.distantPast
         let openingTxns = transactions.filter { $0.action == .buyToOpen || $0.action == .sellToOpen }
         let opening = openingTxns.map(\.timestamp).min() ?? transactions.map(\.timestamp).min() ?? Date.distantPast
@@ -439,11 +453,12 @@ struct LedgerRow: Identifiable {
             latestTimestamp: latest,
             openingTimestamp: opening,
             isOptionGroup: true,
-            isEquityGroup: false
+            isEquityGroup: false,
+            realizedPLs: realizedPLs
         )
     }
 
-    static func equityGroup(transactions: [Transaction], instrument: Instrument?) -> LedgerRow {
+    static func equityGroup(transactions: [Transaction], instrument: Instrument?, realizedPLs: [RealizedPL] = []) -> LedgerRow {
         let latest = transactions.map(\.timestamp).max() ?? Date.distantPast
         let openingTxns = transactions.filter { $0.action == .buy }
         let opening = openingTxns.map(\.timestamp).min() ?? transactions.map(\.timestamp).min() ?? Date.distantPast
@@ -456,7 +471,8 @@ struct LedgerRow: Identifiable {
             latestTimestamp: latest,
             openingTimestamp: opening,
             isOptionGroup: false,
-            isEquityGroup: true
+            isEquityGroup: true,
+            realizedPLs: realizedPLs
         )
     }
 
@@ -472,7 +488,9 @@ struct LedgerRow: Identifiable {
         transactions.filter {
             $0.action == .buyToClose ||
             $0.action == .sellToClose ||
-            $0.action == .sell
+            $0.action == .sell ||
+            $0.action == .assign ||
+            $0.action == .expire
         }
     }
 
