@@ -1,5 +1,9 @@
 import Foundation
 
+enum LedgerEngineError: Error, Equatable {
+    case invalidOptionInstrumentForAssignment
+}
+
 /// Pure functional ledger engine that processes transactions into derived state
 class LedgerEngine {
 
@@ -292,7 +296,7 @@ class LedgerEngine {
 
             let totalQuantity = openLots.reduce(0) { $0 + $1.remainingQuantity }
             let totalCostBasis = openLots.reduce(0) { $0 + ($1.costBasis * ($1.remainingQuantity / $1.originalQuantity)) }
-            let avgPrice = totalQuantity > 0 ? totalCostBasis / totalQuantity : 0
+            let avgPrice = totalCostBasis / totalQuantity
 
             let position = Position(
                 instrumentId: instrumentId,
@@ -349,7 +353,8 @@ class LedgerEngine {
 
         // Group positions by underlying symbol
         for position in positions {
-            guard let instrument = instruments[position.instrumentId] else { continue }
+            // Positions are only created for instruments present in the lookup table.
+            let instrument = instruments[position.instrumentId]!
             let symbol = instrument.underlyingTicker
 
             if summaries[symbol] == nil {
@@ -410,13 +415,13 @@ extension LedgerEngine {
         instrument: Instrument,
         assignmentDate: Date,
         equityInstrument: Instrument
-    ) -> (optionClose: Transaction, equityTrade: Transaction) {
+    ) throws -> (optionClose: Transaction, equityTrade: Transaction) {
 
         guard instrument.type == .option,
               let strike = instrument.strike,
               let callPut = instrument.callPut,
               let multiplier = instrument.multiplier else {
-            fatalError("Invalid option instrument for assignment")
+            throw LedgerEngineError.invalidOptionInstrumentForAssignment
         }
 
         let linkGroupId = UUID()
