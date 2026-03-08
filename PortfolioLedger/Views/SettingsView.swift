@@ -5,6 +5,40 @@ struct SettingsView: View {
     @State private var showingExportSheet = false
     @State private var showingImportSheet = false
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+
+    private var reportBugURL: URL {
+        var components = URLComponents(string: "https://github.com/MustBeMerrick/portfolio-ledger-app/issues/new")!
+        components.queryItems = [
+            URLQueryItem(name: "title", value: "BUG: "),
+            URLQueryItem(
+                name: "body",
+                value: """
+                ## Summary
+
+                ## Steps to Reproduce
+                1.
+                2.
+                3.
+
+                ## Expected Behavior
+
+                ## Actual Behavior
+
+                ## Environment
+                - App version: \(appVersion)
+                - Device:
+                - OS version:
+
+                ## Additional Context/Screenshots
+                """
+            )
+        ]
+        return components.url!
+    }
+
     var body: some View {
         NavigationView {
             List {
@@ -22,11 +56,17 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Support") {
+                    Link(destination: reportBugURL) {
+                        Label("Report a Bug", systemImage: "ladybug")
+                    }
+                }
+
                 Section("About") {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(appVersion)
                             .foregroundColor(.secondary)
                     }
 
