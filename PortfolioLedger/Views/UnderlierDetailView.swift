@@ -21,6 +21,13 @@ struct UnderlierDetailView: View {
         max(0, summary.totalEquityShares - collateralizedShares)
     }
 
+    var openEquityLots: [EquityLot] {
+        guard let equityPos = summary.equityPosition else { return [] }
+        return dataStore.ledgerOutput.equityLots
+            .filter { $0.instrumentId == equityPos.instrumentId && $0.isOpen }
+            .sorted { $0.openDate > $1.openDate }
+    }
+
     var relatedTransactions: [Transaction] {
         dataStore.transactions.filter { txn in
             guard let instrument = dataStore.instruments[txn.instrumentId] else { return false }
@@ -59,6 +66,25 @@ struct UnderlierDetailView: View {
                         Spacer()
                         Text(summary.totalEquityCostBasis.asCurrency)
                             .fontWeight(.bold)
+                    }
+
+                    if openEquityLots.count > 1 {
+                        ForEach(openEquityLots) { lot in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(lot.openDate, style: .date)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(lot.remainingQuantity.asQuantity) shares @ \(lot.pricePerShare.asCurrency)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Text(lot.costBasis.asCurrency)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                            }
+                        }
                     }
 
                     HStack {
