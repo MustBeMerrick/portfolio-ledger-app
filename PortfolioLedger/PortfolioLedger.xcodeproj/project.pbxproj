@@ -10,6 +10,7 @@
 		49350D112F3064AA00F558AF /* EquityPositionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49350D0E2F3064AA00F558AF /* EquityPositionsView.swift */; };
 		49350D122F3064AA00F558AF /* PositionsMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49350D102F3064AA00F558AF /* PositionsMenuView.swift */; };
 		49350D132F3064AA00F558AF /* OptionsPositionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49350D0F2F3064AA00F558AF /* OptionsPositionsView.swift */; };
+		49926F4A2F5E7ED800383906 /* Decimal+Currency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49926F482F5E7ED800383906 /* Decimal+Currency.swift */; };
 		49CFEF092F2EDB4800393228 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49CFEF082F2EDB4800393228 /* Assets.xcassets */; };
 		49CFEF292F2EDB9F00393228 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49CFEF222F2EDB9F00393228 /* DashboardView.swift */; };
 		49CFEF2A2F2EDB9F00393228 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49CFEF1B2F2EDB9F00393228 /* DataStore.swift */; };
@@ -35,6 +36,7 @@
 		49350D0E2F3064AA00F558AF /* EquityPositionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquityPositionsView.swift; sourceTree = "<group>"; };
 		49350D0F2F3064AA00F558AF /* OptionsPositionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptionsPositionsView.swift; sourceTree = "<group>"; };
 		49350D102F3064AA00F558AF /* PositionsMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionsMenuView.swift; sourceTree = "<group>"; };
+		49926F482F5E7ED800383906 /* Decimal+Currency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Decimal+Currency.swift"; sourceTree = "<group>"; };
 		49AE88B32F300687002F0739 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		49CFEF012F2EDB4700393228 /* PortfolioLedger.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PortfolioLedger.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		49CFEF082F2EDB4800393228 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -69,12 +71,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		49926F492F5E7ED800383906 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				49926F482F5E7ED800383906 /* Decimal+Currency.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
 		49CFEEF82F2EDB4700393228 = {
 			isa = PBXGroup;
 			children = (
 				49CFEF082F2EDB4800393228 /* Assets.xcassets */,
 				49CFEF112F2EDB9F00393228 /* App */,
 				49CFEF132F2EDB9F00393228 /* Engine */,
+				49926F492F5E7ED800383906 /* Extensions */,
 				49CFEF182F2EDB9F00393228 /* Models */,
 				49CFEF192F2EDB9F00393228 /* Resources */,
 				49CFEF1C2F2EDB9F00393228 /* Services */,
@@ -253,6 +264,7 @@
 				49CFEF352F2EDB9F00393228 /* AddEquityTradeView.swift in Sources */,
 				49CFEF362F2EDB9F00393228 /* AddOptionTradeView.swift in Sources */,
 				49E102A82F2EE85800911203 /* ClosePositionView.swift in Sources */,
+				49926F4A2F5E7ED800383906 /* Decimal+Currency.swift in Sources */,
 				49CFEF372F2EDB9F00393228 /* SettingsView.swift in Sources */,
 				49CFEF382F2EDB9F00393228 /* LedgerEngine.swift in Sources */,
 				49CFEF392F2EDB9F00393228 /* DerivedData.swift in Sources */,

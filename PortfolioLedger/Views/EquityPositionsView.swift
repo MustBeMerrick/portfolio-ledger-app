@@ -65,7 +65,7 @@ struct EquitySummaryRow: View {
 
                 Spacer()
 
-                Text("\(summary.totalEquityShares.description) shares")
+                Text("\(summary.totalEquityShares.asQuantity) shares")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -74,7 +74,7 @@ struct EquitySummaryRow: View {
                 Text("Avg Cost:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("$\(summary.averageEquityCost.description)")
+                Text(summary.averageEquityCost.asCurrency)
                     .font(.caption)
                     .fontWeight(.medium)
 
@@ -83,7 +83,7 @@ struct EquitySummaryRow: View {
                 Text("Basis:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("$\(summary.totalEquityCostBasis.description)")
+                Text(summary.totalEquityCostBasis.asCurrency)
                     .font(.caption)
                     .fontWeight(.medium)
             }
