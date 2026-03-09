@@ -2220,4 +2220,316 @@ final class LedgerEngineTests: XCTestCase {
         XCTAssertFalse(output.optionLots[0].isOpen)
         XCTAssertEqual(output.positions.filter { $0.type == .option }.count, 0)
     }
+
+    // MARK: - Issue #14: Separate trades must not be consolidated
+
+    /// Two separate buys for the same equity must produce two distinct lots,
+    /// each linked to its own transaction.  This is the core invariant that
+    /// lets the UI display individual trades rather than a merged row.
+    func testTwoSeparateBuysProduceTwoDistinctLots() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        let buy1 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 400,
+            fees: 0
+        )
+
+        let buy2 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 50,
+            price: 410,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2],
+            instruments: [instrumentId: msft]
+        )
+
+        // Engine must produce exactly two lots — one per transaction
+        XCTAssertEqual(output.equityLots.count, 2)
+
+        let lot1 = output.equityLots.first { $0.transactionId == buy1.id }
+        let lot2 = output.equityLots.first { $0.transactionId == buy2.id }
+
+        XCTAssertNotNil(lot1, "No lot found linked to buy1")
+        XCTAssertNotNil(lot2, "No lot found linked to buy2")
+
+        XCTAssertEqual(lot1?.originalQuantity, 50)
+        XCTAssertEqual(lot1?.remainingQuantity, 50)
+        XCTAssertEqual(lot1?.pricePerShare, 400)
+
+        XCTAssertEqual(lot2?.originalQuantity, 50)
+        XCTAssertEqual(lot2?.remainingQuantity, 50)
+        XCTAssertEqual(lot2?.pricePerShare, 410)
+
+        // Both lots belong to the same instrument
+        XCTAssertEqual(lot1?.instrumentId, instrumentId)
+        XCTAssertEqual(lot2?.instrumentId, instrumentId)
+    }
+
+    /// The consolidated position for two separate buys must reflect the
+    /// combined quantity and weighted-average cost — one Position per instrument.
+    func testTwoSeparateBuysProduceOneAggregatePosition() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        let buy1 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 400,
+            fees: 0
+        )
+
+        let buy2 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 50,
+            price: 410,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2],
+            instruments: [instrumentId: msft]
+        )
+
+        let equityPositions = output.positions.filter { $0.type == .equity }
+        XCTAssertEqual(equityPositions.count, 1, "Must produce exactly one aggregate equity position")
+
+        let position = equityPositions[0]
+        XCTAssertEqual(position.quantity, 100)              // 50 + 50
+        XCTAssertEqual(position.costBasis, 40_500)          // 50*400 + 50*410
+        XCTAssertEqual(position.averagePrice, 405)          // 40500 / 100
+    }
+
+    /// The underlier summary must show the same aggregate numbers as the position.
+    func testTwoSeparateBuysUnderlierSummaryIsAggregate() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        let buy1 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 400,
+            fees: 0
+        )
+
+        let buy2 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 50,
+            price: 410,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2],
+            instruments: [instrumentId: msft]
+        )
+
+        let summary = output.underlierSummaries["MSFT"]
+        XCTAssertNotNil(summary)
+        XCTAssertEqual(summary?.totalEquityShares, 100)
+        XCTAssertEqual(summary?.totalEquityCostBasis, 40_500)
+        XCTAssertEqual(summary?.averageEquityCost, 405)
+    }
+
+    /// Partially consuming a buy lot must leave the lot open with the correct
+    /// remaining quantity, and produce a P/L record scoped to only the closed shares.
+    /// The view relies on lot.isOpen + lot.remainingQuantity to render the open-remainder
+    /// sub-row, and on realizedPLs scoped to openTransactionId for the closed-portion row.
+    func testPartialSellLeavesLotOpenWithCorrectRemainder() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        // Use 100 shares so the partial-consumption ratio (50/100) is exactly representable
+        let buy = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 100,
+            price: 170,
+            fees: 0
+        )
+
+        let sell = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .sell,
+            quantity: 50,
+            price: 200,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy, sell],
+            instruments: [instrumentId: msft]
+        )
+
+        // Lot must remain open with 50 shares left
+        XCTAssertEqual(output.equityLots.count, 1)
+        let lot = output.equityLots[0]
+        XCTAssertTrue(lot.isOpen)
+        XCTAssertEqual(lot.remainingQuantity, 50)
+        XCTAssertEqual(lot.transactionId, buy.id)
+
+        // P/L must reflect only the 50 closed shares, linked to the buy
+        XCTAssertEqual(output.realizedPLs.count, 1)
+        let pl = output.realizedPLs[0]
+        XCTAssertEqual(pl.quantity, 50)
+        XCTAssertEqual(pl.openTransactionId, buy.id)
+        XCTAssertEqual(pl.transactionId, sell.id)
+        XCTAssertEqual(pl.costBasis, 8_500)   // 50/100 * (100*170)
+        XCTAssertEqual(pl.proceeds, 10_000)   // 50 * 200
+        XCTAssertEqual(pl.realizedPL, 1_500)
+    }
+
+    /// When a single sell spans two buy lots (FIFO), each lot must produce its own
+    /// P/L record with openTransactionId pointing back to the correct buy.
+    /// This is the key engine invariant behind the assignment-split display.
+    func testSellAcrossMultipleLotsProducesSeparatePLPerLot() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        let buy1 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 150,
+            fees: 0
+        )
+
+        // Use 100 shares for buy2 so 50/100 is exactly representable
+        let buy2 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 100,
+            price: 170,
+            fees: 0
+        )
+
+        // Sell 100: fully consumes lot1 (50) + partially consumes lot2 (50 of 100)
+        let sell = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_200),
+            action: .sell,
+            quantity: 100,
+            price: 200,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2, sell],
+            instruments: [instrumentId: msft]
+        )
+
+        // Two P/L records — one per lot consumed
+        XCTAssertEqual(output.realizedPLs.count, 2)
+
+        let pl1 = output.realizedPLs.first { $0.openTransactionId == buy1.id }
+        let pl2 = output.realizedPLs.first { $0.openTransactionId == buy2.id }
+
+        XCTAssertNotNil(pl1, "No P/L found linked to buy1")
+        XCTAssertNotNil(pl2, "No P/L found linked to buy2")
+
+        // lot1: fully consumed — 50 shares
+        XCTAssertEqual(pl1?.quantity, 50)
+        XCTAssertEqual(pl1?.costBasis, 7_500)    // 50 * 150
+        XCTAssertEqual(pl1?.proceeds, 10_000)    // 50 * 200
+        XCTAssertEqual(pl1?.realizedPL, 2_500)
+        XCTAssertEqual(pl1?.transactionId, sell.id)
+
+        // lot2: partially consumed — 50 of 100 shares
+        XCTAssertEqual(pl2?.quantity, 50)
+        XCTAssertEqual(pl2?.costBasis, 8_500)    // 50/100 * (100*170)
+        XCTAssertEqual(pl2?.proceeds, 10_000)    // 50 * 200
+        XCTAssertEqual(pl2?.realizedPL, 1_500)
+        XCTAssertEqual(pl2?.transactionId, sell.id)
+
+        // Both P/Ls link to the same sell transaction
+        XCTAssertEqual(pl1?.transactionId, pl2?.transactionId)
+
+        // lot1 fully consumed, lot2 has 50 shares remaining
+        let lot1 = output.equityLots.first { $0.transactionId == buy1.id }
+        let lot2 = output.equityLots.first { $0.transactionId == buy2.id }
+        XCTAssertFalse(lot1?.isOpen ?? true)
+        XCTAssertTrue(lot2?.isOpen ?? false)
+        XCTAssertEqual(lot2?.remainingQuantity, 50)
+    }
+
+    /// When a sell closes shares from multiple lots, each RealizedPL record must
+    /// carry the correct openTransactionId pointing back to the buy it came from.
+    func testRealizedPLLinksToCorrectOpeningTransaction() {
+        let instrumentId = UUID()
+        let msft = Instrument(id: instrumentId, symbol: "MSFT")
+
+        let buy1 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 50,
+            price: 400,
+            fees: 0
+        )
+
+        let buy2 = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .buy,
+            quantity: 50,
+            price: 410,
+            fees: 0
+        )
+
+        let sell = Transaction(
+            instrumentId: instrumentId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_200),
+            action: .sell,
+            quantity: 50,
+            price: 450,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [buy1, buy2, sell],
+            instruments: [instrumentId: msft]
+        )
+
+        // Selling 50 shares closes the first lot (FIFO)
+        XCTAssertEqual(output.realizedPLs.count, 1)
+        let pl = output.realizedPLs[0]
+
+        // Closing transaction must reference the sell
+        XCTAssertEqual(pl.transactionId, sell.id)
+
+        // Opening transaction must reference the first buy (FIFO)
+        XCTAssertEqual(pl.openTransactionId, buy1.id)
+
+        XCTAssertEqual(pl.quantity, 50)
+        XCTAssertEqual(pl.costBasis, 20_000)    // 50 * 400
+        XCTAssertEqual(pl.proceeds, 22_500)     // 50 * 450
+        XCTAssertEqual(pl.realizedPL, 2_500)
+
+        // First lot fully consumed, second lot still open
+        let lot1 = output.equityLots.first { $0.transactionId == buy1.id }
+        let lot2 = output.equityLots.first { $0.transactionId == buy2.id }
+        XCTAssertEqual(lot1?.remainingQuantity, 0)
+        XCTAssertEqual(lot2?.remainingQuantity, 50)
+    }
 }

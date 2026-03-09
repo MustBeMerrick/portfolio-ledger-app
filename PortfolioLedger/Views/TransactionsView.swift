@@ -25,7 +25,31 @@ struct TransactionsView: View {
     private var ledgerRows: [LedgerRow] {
         var rows: [LedgerRow] = []
         var optionGroups: [String: [Transaction]] = [:]
-        var equityGroups: [String: [Transaction]] = [:]
+
+        let allRealizedPLs = dataStore.ledgerOutput.realizedPLs
+
+        // Map: buy transactionId -> EquityLot (to check if fully closed)
+        let lotByBuyTxId: [UUID: EquityLot] = dataStore.ledgerOutput.equityLots
+            .reduce(into: [:]) { $0[$1.transactionId] = $1 }
+
+        // Map: buy transactionId -> sell transactionIds that closed it (via realizedPLs)
+        var sellIdsByBuyTxId: [UUID: [UUID]] = [:]
+        for pl in allRealizedPLs {
+            guard let instrument = dataStore.instruments[pl.instrumentId], instrument.type == .equity else { continue }
+            sellIdsByBuyTxId[pl.openTransactionId, default: []].append(pl.transactionId)
+        }
+
+        // Pre-compute which sell txIds are absorbed into an equity group row.
+        // Any buy with P/L (fully OR partially consumed) owns its closing sell(s).
+        // Use ALL transactions so search filters don't break grouping.
+        let allTxById: [UUID: Transaction] = allTransactions.reduce(into: [:]) { $0[$1.id] = $1 }
+        var groupedSellTxIds = Set<UUID>()
+        for txn in allTransactions {
+            guard let instrument = dataStore.instruments[txn.instrumentId],
+                  instrument.type == .equity, txn.action == .buy,
+                  let sellIds = sellIdsByBuyTxId[txn.id] else { continue }
+            sellIds.forEach { groupedSellTxIds.insert($0) }
+        }
 
         for txn in filteredTransactions {
             guard let instrument = dataStore.instruments[txn.instrumentId] else {
@@ -37,27 +61,33 @@ struct TransactionsView: View {
                 let key = txn.instrumentId.uuidString
                 optionGroups[key, default: []].append(txn)
             } else if instrument.type == .equity {
-                let key = txn.instrumentId.uuidString
-                equityGroups[key, default: []].append(txn)
+                if txn.action == .buy, let sellIds = sellIdsByBuyTxId[txn.id] {
+                    // This buy has been at least partially closed — show a closed group row
+                    let pls = allRealizedPLs.filter { $0.openTransactionId == txn.id }
+                    let sells = Set(sellIds).compactMap { allTxById[$0] }.sorted { $0.timestamp < $1.timestamp }
+                    rows.append(LedgerRow.equityGroup(transactions: [txn] + sells, instrument: instrument, realizedPLs: pls))
+
+                    // If partially consumed, also show the remaining open shares as a separate row
+                    if let lot = lotByBuyTxId[txn.id], lot.isOpen {
+                        rows.append(LedgerRow.openRemainder(buyTransaction: txn, remainingQty: lot.remainingQuantity, instrument: instrument))
+                    }
+                } else if txn.action == .sell && groupedSellTxIds.contains(txn.id) {
+                    // This sell is absorbed into a buy group — skip
+                    continue
+                } else {
+                    // Untouched buy or standalone sell: individual row
+                    rows.append(LedgerRow.single(transaction: txn, instrument: instrument, realizedPLs: []))
+                }
             } else {
                 rows.append(LedgerRow.single(transaction: txn, instrument: instrument))
             }
         }
-
-        let allRealizedPLs = dataStore.ledgerOutput.realizedPLs
 
         for (_, txns) in optionGroups {
             guard let first = txns.first else { continue }
             let instrument = dataStore.instruments[first.instrumentId]
             let pls = allRealizedPLs.filter { $0.instrumentId == first.instrumentId }
             rows.append(LedgerRow.optionGroup(transactions: txns, instrument: instrument, realizedPLs: pls))
-        }
-
-        for (_, txns) in equityGroups {
-            guard let first = txns.first else { continue }
-            let instrument = dataStore.instruments[first.instrumentId]
-            let pls = allRealizedPLs.filter { $0.instrumentId == first.instrumentId }
-            rows.append(LedgerRow.equityGroup(transactions: txns, instrument: instrument, realizedPLs: pls))
         }
 
         return rows.sorted { $0.openingTimestamp > $1.openingTimestamp }
@@ -68,6 +98,7 @@ struct TransactionsView: View {
             List {
                 ForEach(ledgerRows) { row in
                     TransactionDetailRow(row: row)
+                        .listRowBackground(row.isClosed ? Color(red: 0.82, green: 0.82, blue: 0.84) : nil)
                 }
                 .onDelete(perform: deleteTransactions)
             }
@@ -111,156 +142,120 @@ struct TransactionDetailRow: View {
     let row: LedgerRow
 
     var body: some View {
+        let isEquityRow = row.isEquityGroup || (row.transaction?.action.isEquity == true)
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if row.isClosed {
-                    Text("Closed")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.15))
-                        .foregroundColor(.secondary)
-                        .cornerRadius(4)
-                } else {
-                    Text(badgeText)
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(actionColor.opacity(0.2))
-                        .foregroundColor(actionColor)
-                        .cornerRadius(4)
+
+            if isEquityRow {
+                let buyColor  = Color(red: 0.55, green: 0.10, blue: 0.15)
+                let sellColor = Color(red: 0.00, green: 0.38, blue: 0.10)
+                let plColor: Color = equityDisplayPL.map { $0 >= 0 ? .green : .red } ?? .secondary
+                let qtyStr  = equityDisplayQty.asQuantity
+                let buyStr  = equityDisplayBuyPrice.map  { "$\(formatPrice($0))" } ?? "—"
+                let sellStr = equityDisplaySellPrice.map { "$\(formatPrice($0))" } ?? "—"
+                let plStr   = equityDisplayPL.map { formatCurrency($0) } ?? "—"
+                let openDate  = row.openingTransactions.first?.timestamp
+                let closeDate = row.closingTransactions.first?.timestamp
+
+                // Symbol + P/L on same top row
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.instrument?.displayName ?? "Unknown")
+                        .font(.headline).fontWeight(.bold)
+                    Spacer()
+                    Text("P/L")
+                        .font(.subheadline).foregroundColor(.secondary)
+                    Text(plStr)
+                        .font(.body).fontWeight(.bold).foregroundColor(plColor)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
 
-                Spacer()
-
-                // Timestamp
-                Text(row.latestTimestamp, style: .date)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // Instrument
-            if let inst = row.instrument {
-                Text(inst.displayName)
-                    .font(.headline)
-            } else {
-                Text("Unknown Instrument")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-            }
-
-            // Trade details
-            if row.isOptionGroup {
-                HStack {
-                    Text("Qty:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(optionQuantity.asQuantity)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    Text("\(openLabel):")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("$\(formatPrice(optionOpenPrice))")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    if hasClosing {
-                        Text("\(closeLabel):")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text("$\(formatPrice(optionClosePrice))")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    } else {
-                        Text("Close:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text("—")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                // Shares | Buy | Sell
+                HStack(alignment: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(" ").font(.caption)
+                        Spacer().frame(height: 4)
+                        Text("Shares").font(.subheadline).foregroundColor(.secondary)
+                        Text(qtyStr).font(.body).fontWeight(.semibold)
                     }
+                    .frame(width: 60, alignment: .leading)
+                    VStack(alignment: .center, spacing: 0) {
+                        if let d = openDate {
+                            Text(d, format: .dateTime.month(.abbreviated).day())
+                                .font(.caption).foregroundColor(.secondary)
+                        } else {
+                            Text(" ").font(.caption)
+                        }
+                        Spacer().frame(height: 4)
+                        Text("Buy").font(.subheadline).foregroundColor(buyColor)
+                        Text(buyStr).font(.body).fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    VStack(alignment: .center, spacing: 0) {
+                        if let d = closeDate {
+                            Text(d, format: .dateTime.month(.abbreviated).day())
+                                .font(.caption).foregroundColor(.secondary)
+                        } else {
+                            Text(" ").font(.caption)
+                        }
+                        Spacer().frame(height: 4)
+                        Text("Sell").font(.subheadline).foregroundColor(sellColor)
+                        Text(sellStr).font(.body).fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                // Non-equity: instrument name then option details
+                if let inst = row.instrument {
+                    Text(inst.displayName).font(.headline).fontWeight(.bold)
+                } else {
+                    Text("Unknown Instrument").font(.headline).foregroundColor(.secondary)
                 }
 
-                HStack {
-                    Text("P/L:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(formatCurrency(optionTotalPL))
-                        .font(.subheadline)
-                        .fontWeight(.bold)
-                        .foregroundColor(optionTotalPL >= 0 ? .green : .red)
-                }
-            } else if row.isEquityGroup {
-                HStack {
-                    Text("Qty:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(equityQuantity.asQuantity)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                if row.isOptionGroup {
+                    HStack {
+                        Text("Qty:")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text(optionQuantity.asQuantity)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
 
-                    Spacer()
+                        Spacer()
 
-                    Text("BUY:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("$\(formatPrice(equityBuyPrice))")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        Text("\(openLabel):")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("$\(formatPrice(optionOpenPrice))")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
 
-                    Spacer()
+                        Spacer()
 
-                    Text("SELL:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("$\(formatPrice(equitySellPrice))")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
+                        if hasClosing {
+                            Text("\(closeLabel):")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("$\(formatPrice(optionClosePrice))")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        } else {
+                            Text("Close:")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("—")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                    }
 
-                HStack {
-                    Text("P/L:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(formatCurrency(equityTotalPL))
-                        .font(.subheadline)
-                        .fontWeight(.bold)
-                        .foregroundColor(equityTotalPL >= 0 ? .green : .red)
-                }
-            } else if let transaction = row.transaction {
-                HStack {
-                    Text("Qty:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(transaction.quantity.asQuantity)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    Text("Price:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("$\(transaction.price.asPrice)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    Text("Total:")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(transaction.totalAmount.asCurrency)
-                        .font(.subheadline)
-                        .fontWeight(.bold)
+                    HStack {
+                        Text("P/L:")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text(formatCurrency(optionTotalPL))
+                            .font(.subheadline)
+                            .fontWeight(.bold)
+                            .foregroundColor(optionTotalPL >= 0 ? .green : .red)
+                    }
                 }
             }
 
@@ -364,9 +359,12 @@ struct TransactionDetailRow: View {
     }
 
     private var equityQuantity: Decimal {
-        let buys = row.openingTransactions.reduce(0) { $0 + $1.quantity }
-        let sells = row.closingTransactions.reduce(0) { $0 + $1.quantity }
-        return max(buys, sells)
+        // For closed groups, use P/L qty — it reflects only the shares from this
+        // specific lot, even if the sell transaction spanned multiple lots.
+        if row.isEquityGroup && !row.realizedPLs.isEmpty {
+            return row.realizedPLs.reduce(0) { $0 + $1.quantity }
+        }
+        return row.openingTransactions.reduce(0) { $0 + $1.quantity }
     }
 
     private var equityBuyPrice: Decimal {
@@ -379,6 +377,30 @@ struct TransactionDetailRow: View {
 
     private var equityTotalPL: Decimal {
         row.realizedPLs.reduce(0) { $0 + $1.realizedPL }
+    }
+
+    // Unified equity display helpers — work for both group and single rows
+
+    private var equityDisplayQty: Decimal {
+        if row.isEquityGroup { return equityQuantity }
+        return row.quantityOverride ?? (row.transaction?.quantity ?? 0)
+    }
+
+    private var equityDisplayBuyPrice: Decimal? {
+        if row.isEquityGroup { return equityBuyPrice }
+        guard row.transaction?.action == .buy else { return nil }
+        return row.transaction?.price
+    }
+
+    private var equityDisplaySellPrice: Decimal? {
+        if row.isEquityGroup { return equitySellPrice }
+        guard row.transaction?.action == .sell else { return nil }
+        return row.transaction?.price
+    }
+
+    private var equityDisplayPL: Decimal? {
+        guard !row.realizedPLs.isEmpty else { return nil }
+        return equityTotalPL
     }
 
     private var optionTotalPL: Decimal {
@@ -414,6 +436,8 @@ struct LedgerRow: Identifiable {
     let isOptionGroup: Bool
     let isEquityGroup: Bool
     let realizedPLs: [RealizedPL]
+    /// Overrides the displayed quantity for open-remainder rows (partial lot split).
+    let quantityOverride: Decimal?
 
     static func single(transaction: Transaction, instrument: Instrument?, realizedPLs: [RealizedPL] = []) -> LedgerRow {
         LedgerRow(
@@ -423,9 +447,26 @@ struct LedgerRow: Identifiable {
             instrument: instrument,
             latestTimestamp: transaction.timestamp,
             openingTimestamp: transaction.timestamp,
-            isOptionGroup: instrument?.type == .option,
-            isEquityGroup: instrument?.type == .equity,
-            realizedPLs: realizedPLs
+            isOptionGroup: false,
+            isEquityGroup: false,
+            realizedPLs: realizedPLs,
+            quantityOverride: nil
+        )
+    }
+
+    /// An open sub-row representing the remaining shares of a partially-consumed buy lot.
+    static func openRemainder(buyTransaction: Transaction, remainingQty: Decimal, instrument: Instrument?) -> LedgerRow {
+        LedgerRow(
+            id: "equity-remainder-\(buyTransaction.id.uuidString)",
+            transaction: buyTransaction,
+            transactions: [buyTransaction],
+            instrument: instrument,
+            latestTimestamp: buyTransaction.timestamp,
+            openingTimestamp: buyTransaction.timestamp,
+            isOptionGroup: false,
+            isEquityGroup: false,
+            realizedPLs: [],
+            quantityOverride: remainingQty
         )
     }
 
@@ -443,7 +484,8 @@ struct LedgerRow: Identifiable {
             openingTimestamp: opening,
             isOptionGroup: true,
             isEquityGroup: false,
-            realizedPLs: realizedPLs
+            realizedPLs: realizedPLs,
+            quantityOverride: nil
         )
     }
 
@@ -451,9 +493,11 @@ struct LedgerRow: Identifiable {
         let latest = transactions.map(\.timestamp).max() ?? Date.distantPast
         let openingTxns = transactions.filter { $0.action == .buy }
         let opening = openingTxns.map(\.timestamp).min() ?? transactions.map(\.timestamp).min() ?? Date.distantPast
-        let keyInstrument = transactions.first?.instrumentId.uuidString ?? UUID().uuidString
+        // Use the buy transaction ID (not instrument ID) to avoid collisions across multiple
+        // closed positions in the same stock.
+        let buyTxId = openingTxns.first?.id.uuidString ?? UUID().uuidString
         return LedgerRow(
-            id: "equity-\(keyInstrument)",
+            id: "equity-\(buyTxId)",
             transaction: nil,
             transactions: transactions,
             instrument: instrument,
@@ -461,7 +505,8 @@ struct LedgerRow: Identifiable {
             openingTimestamp: opening,
             isOptionGroup: false,
             isEquityGroup: true,
-            realizedPLs: realizedPLs
+            realizedPLs: realizedPLs,
+            quantityOverride: nil
         )
     }
 
@@ -499,9 +544,9 @@ struct LedgerRow: Identifiable {
         }
 
         if isEquityGroup {
-            let buyQty = openingTransactions.reduce(0) { $0 + $1.quantity }
-            let sellQty = closingTransactions.reduce(0) { $0 + $1.quantity }
-            return buyQty > 0 && buyQty == sellQty
+            // Equity groups are created whenever a buy has P/L records (fully or partially
+            // consumed). The group always represents the closed portion, so it's always closed.
+            return !realizedPLs.isEmpty
         }
 
         return false
