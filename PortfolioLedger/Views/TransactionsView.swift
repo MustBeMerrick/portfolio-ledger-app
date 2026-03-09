@@ -157,7 +157,7 @@ struct TransactionDetailRow: View {
                     Text("Qty:")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Text(optionQuantity.description)
+                    Text(optionQuantity.asQuantity)
                         .font(.subheadline)
                         .fontWeight(.medium)
 
@@ -203,7 +203,7 @@ struct TransactionDetailRow: View {
                     Text("Qty:")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Text(equityQuantity.description)
+                    Text(equityQuantity.asQuantity)
                         .font(.subheadline)
                         .fontWeight(.medium)
 
@@ -240,7 +240,7 @@ struct TransactionDetailRow: View {
                     Text("Qty:")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Text(transaction.quantity.description)
+                    Text(transaction.quantity.asQuantity)
                         .font(.subheadline)
                         .fontWeight(.medium)
 
@@ -249,7 +249,7 @@ struct TransactionDetailRow: View {
                     Text("Price:")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Text("$\(transaction.price.description)")
+                    Text("$\(transaction.price.asPrice)")
                         .font(.subheadline)
                         .fontWeight(.medium)
 
@@ -258,7 +258,7 @@ struct TransactionDetailRow: View {
                     Text("Total:")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Text("$\(transaction.totalAmount.description)")
+                    Text(transaction.totalAmount.asCurrency)
                         .font(.subheadline)
                         .fontWeight(.bold)
                 }
@@ -266,7 +266,7 @@ struct TransactionDetailRow: View {
 
             // Fees if present
             if let transaction = row.transaction, transaction.fees > 0 {
-                Text("Fees: $\(transaction.fees.description)")
+                Text("Fees: \(transaction.fees.asCurrency)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -392,20 +392,9 @@ struct TransactionDetailRow: View {
         return total / totalQty
     }
 
-    private func formatPrice(_ value: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "0.00"
-    }
+    private func formatPrice(_ value: Decimal) -> String { value.asPrice }
 
-    private func formatCurrency(_ value: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
-    }
+    private func formatCurrency(_ value: Decimal) -> String { value.asCurrency }
 }
 
 struct TransactionsView_Previews: PreviewProvider {

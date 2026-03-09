@@ -43,21 +43,21 @@ struct UnderlierDetailView: View {
                     HStack {
                         Text("Shares")
                         Spacer()
-                        Text(summary.totalEquityShares.description)
+                        Text(summary.totalEquityShares.asQuantity)
                             .fontWeight(.bold)
                     }
 
                     HStack {
                         Text("Average Cost")
                         Spacer()
-                        Text("$\(summary.averageEquityCost.description)")
+                        Text(summary.averageEquityCost.asCurrency)
                             .fontWeight(.medium)
                     }
 
                     HStack {
                         Text("Total Cost Basis")
                         Spacer()
-                        Text("$\(summary.totalEquityCostBasis.description)")
+                        Text(summary.totalEquityCostBasis.asCurrency)
                             .fontWeight(.bold)
                     }
 
@@ -68,7 +68,7 @@ struct UnderlierDetailView: View {
                                 showingEquityCloseSheet = true
                             } label: {
                                 Text(freeEquityShares < summary.totalEquityShares && freeEquityShares > 0
-                                     ? "Close \(freeEquityShares.description) shares"
+                                     ? "Close \(freeEquityShares.asQuantity) shares"
                                      : "Close")
                                     .font(.caption)
                                     .fontWeight(.semibold)
@@ -85,7 +85,7 @@ struct UnderlierDetailView: View {
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             } else if collateralizedShares > 0 {
-                                Text("\(collateralizedShares.description) shares collateralized")
+                                Text("\(collateralizedShares.asQuantity) shares collateralized")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
@@ -115,7 +115,7 @@ struct UnderlierDetailView: View {
                         Text("Total Realized")
                         Spacer()
                         let total = relatedRealizedPLs.reduce(0) { $0 + $1.realizedPL }
-                        Text("$\(total.description)")
+                        Text(total.asCurrency)
                             .fontWeight(.bold)
                             .foregroundColor(total >= 0 ? .green : .red)
                     }
@@ -158,7 +158,7 @@ struct OptionPositionRow: View {
                         Text("Contracts:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(abs(position.quantity).description)
+                        Text(abs(position.quantity).asQuantity)
                             .font(.caption)
 
                         Spacer()
@@ -177,7 +177,7 @@ struct OptionPositionRow: View {
                         Text("Cost Basis:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("$\(position.costBasis.description)")
+                        Text(position.costBasis.asCurrency)
                             .font(.caption)
                             .fontWeight(.medium)
                     }
@@ -216,7 +216,7 @@ struct RealizedPLRow: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text("\(realizedPL.quantity.description) @ $\((realizedPL.proceeds / realizedPL.quantity).description)")
+                Text("\(realizedPL.quantity.asQuantity) @ \((realizedPL.proceeds / realizedPL.quantity).asCurrency)")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -224,7 +224,7 @@ struct RealizedPLRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("$\(realizedPL.realizedPL.description)")
+                Text(realizedPL.realizedPL.asCurrency)
                     .font(.subheadline)
                     .fontWeight(.bold)
                     .foregroundColor(realizedPL.realizedPL >= 0 ? .green : .red)

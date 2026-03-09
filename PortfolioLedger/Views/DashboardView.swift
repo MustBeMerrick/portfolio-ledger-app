@@ -75,12 +75,7 @@ struct PLSummaryCard: View {
         .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 
-    private func formatCurrency(_ value: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
-    }
+    private func formatCurrency(_ value: Decimal) -> String { value.asCurrency }
 }
 
 struct OpenPositionsSummary: View {
@@ -156,18 +151,9 @@ struct PositionRowCompact: View {
         .padding(.vertical, 4)
     }
 
-    private func formatQuantity(_ value: Decimal) -> String {
-        let num = NSDecimalNumber(decimal: value)
-        return num.intValue == num.intValue ? "\(num.intValue)" : num.description
-    }
+    private func formatQuantity(_ value: Decimal) -> String { value.asQuantity }
 
-    private func formatPrice(_ value: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "0.00"
-    }
+    private func formatPrice(_ value: Decimal) -> String { value.asPrice }
 }
 
 
