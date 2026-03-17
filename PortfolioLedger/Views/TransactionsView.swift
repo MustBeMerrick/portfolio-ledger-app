@@ -4,6 +4,9 @@ struct TransactionsView: View {
     @EnvironmentObject var dataStore: DataStore
     @State private var searchText = ""
     @State private var filterSymbol: String?
+    @State private var showingLinkedDeleteAlert = false
+    @State private var pendingDeleteTransactions: [Transaction] = []
+    @State private var pendingLinkedTransactions: [Transaction] = []
 
     private var allTransactions: [Transaction] {
         dataStore.transactions + dataStore.ledgerOutput.syntheticTransactions
@@ -104,6 +107,17 @@ struct TransactionsView: View {
             }
             .searchable(text: $searchText, prompt: "Search notes or tags")
             .navigationTitle("Ledger")
+            .alert("Delete Assignment", isPresented: $showingLinkedDeleteAlert) {
+                Button("Delete Both", role: .destructive) {
+                    dataStore.deleteTransactions(pendingDeleteTransactions + pendingLinkedTransactions)
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                let names = pendingLinkedTransactions
+                    .compactMap { dataStore.instruments[$0.instrumentId]?.displayName }
+                    .joined(separator: ", ")
+                Text("This transaction is linked to an option assignment. Deleting it will also delete \(names.isEmpty ? "a linked transaction" : names). This cannot be undone.")
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -127,12 +141,14 @@ struct TransactionsView: View {
     private func deleteTransactions(at offsets: IndexSet) {
         for index in offsets {
             let row = ledgerRows[index]
-            if row.isOptionGroup || row.isEquityGroup {
-                for txn in row.transactions {
-                    dataStore.deleteTransaction(txn)
-                }
-            } else if let transaction = row.transaction {
-                dataStore.deleteTransaction(transaction)
+            let rowTxns = row.isOptionGroup || row.isEquityGroup ? row.transactions : [row.transaction].compactMap { $0 }
+            let linked = dataStore.linkedAssignmentTransactions(for: rowTxns)
+            if !linked.isEmpty {
+                pendingDeleteTransactions = rowTxns
+                pendingLinkedTransactions = linked
+                showingLinkedDeleteAlert = true
+            } else {
+                dataStore.deleteTransactions(rowTxns)
             }
         }
     }
@@ -203,58 +219,74 @@ struct TransactionDetailRow: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             } else {
-                // Non-equity: instrument name then option details
-                if let inst = row.instrument {
-                    Text(inst.displayName).font(.headline).fontWeight(.bold)
+                if row.isOptionGroup {
+                    // Title + P/L on same top row (mirrors equity layout)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(row.instrument?.displayName ?? "Unknown Instrument")
+                            .font(.headline).fontWeight(.bold)
+                        Spacer()
+                        if !row.realizedPLs.isEmpty {
+                            Text("P/L")
+                                .font(.subheadline).foregroundColor(.secondary)
+                            Text(formatCurrency(optionTotalPL))
+                                .font(.body).fontWeight(.bold)
+                                .foregroundColor(optionTotalPL >= 0 ? .green : .red)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                    }
                 } else {
-                    Text("Unknown Instrument").font(.headline).foregroundColor(.secondary)
+                    // Non-option single rows
+                    if let inst = row.instrument {
+                        Text(inst.displayName).font(.headline).fontWeight(.bold)
+                    } else {
+                        Text("Unknown Instrument").font(.headline).foregroundColor(.secondary)
+                    }
                 }
 
                 if row.isOptionGroup {
-                    HStack {
-                        Text("Qty:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(optionQuantity.asQuantity)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
 
-                        Spacer()
-
-                        Text("\(openLabel):")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text("$\(formatPrice(optionOpenPrice))")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-
-                        Spacer()
-
-                        if hasClosing {
-                            Text("\(closeLabel):")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text("$\(formatPrice(optionClosePrice))")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        } else {
-                            Text("Close:")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text("—")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
+                    // Qty | Open | Close columns
+                    HStack(alignment: .top, spacing: 0) {
+                        // Qty
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(" ").font(.caption)
+                            Spacer().frame(height: 4)
+                            Text("Qty").font(.subheadline).foregroundColor(.secondary)
+                            Text(optionQuantity.asQuantity).font(.body).fontWeight(.semibold)
                         }
-                    }
+                        .frame(width: 50, alignment: .leading)
 
-                    HStack {
-                        Text("P/L:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(formatCurrency(optionTotalPL))
-                            .font(.subheadline)
-                            .fontWeight(.bold)
-                            .foregroundColor(optionTotalPL >= 0 ? .green : .red)
+                        // Open column (STO / BTO)
+                        VStack(alignment: .center, spacing: 0) {
+                            if let d = row.openingTransactions.first?.timestamp {
+                                Text(d, format: .dateTime.month(.abbreviated).day())
+                                    .font(.caption).foregroundColor(.secondary)
+                            } else {
+                                Text(" ").font(.caption)
+                            }
+                            Spacer().frame(height: 4)
+                            Text(openLabel).font(.subheadline).foregroundColor(openActionColor)
+                            Text("$\(formatPrice(optionOpenPrice))").font(.body).fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                        // Close column (BTC / STC / ASSIGN / EXPIRE)
+                        VStack(alignment: .center, spacing: 0) {
+                            if let d = row.closingTransactions.first?.timestamp {
+                                Text(d, format: .dateTime.month(.abbreviated).day())
+                                    .font(.caption).foregroundColor(.secondary)
+                            } else {
+                                Text(" ").font(.caption)
+                            }
+                            Spacer().frame(height: 4)
+                            if hasClosing {
+                                Text(closeLabel).font(.subheadline).foregroundColor(closeActionColor)
+                                Text("$\(formatPrice(optionClosePrice))").font(.body).fontWeight(.medium)
+                            } else {
+                                Text("—").font(.subheadline).foregroundColor(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
             }
@@ -341,7 +373,7 @@ struct TransactionDetailRow: View {
     }
 
     private var closeLabel: String {
-        if row.closingTransactions.contains(where: { $0.action == .assign }) { return "ASSIGN" }
+        if row.closingTransactions.contains(where: { $0.action == .assign || $0.flags.consumedByAssignment }) { return "ASSIGN" }
         if row.closingTransactions.contains(where: { $0.action == .expire }) { return "EXPIRE" }
         return row.closingTransactions.contains { $0.action == .buyToClose } ? "BTC" : "STC"
     }
@@ -405,6 +437,18 @@ struct TransactionDetailRow: View {
 
     private var optionTotalPL: Decimal {
         row.realizedPLs.reduce(0) { $0 + $1.realizedPL }
+    }
+
+    private var openActionColor: Color {
+        let isSell = row.openingTransactions.contains { $0.action == .sellToOpen }
+        return isSell ? Color(red: 0.00, green: 0.38, blue: 0.10) : Color(red: 0.55, green: 0.10, blue: 0.15)
+    }
+
+    private var closeActionColor: Color {
+        if row.closingTransactions.contains(where: { $0.action == .assign || $0.flags.consumedByAssignment }) { return .purple }
+        if row.closingTransactions.contains(where: { $0.action == .expire }) { return .gray }
+        let isBuy = row.closingTransactions.contains { $0.action == .buyToClose }
+        return isBuy ? Color(red: 0.55, green: 0.10, blue: 0.15) : Color(red: 0.00, green: 0.38, blue: 0.10)
     }
 
     private func weightedAveragePrice(for txns: [Transaction]) -> Decimal {

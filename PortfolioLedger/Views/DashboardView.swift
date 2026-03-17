@@ -144,9 +144,10 @@ struct PositionRowCompact: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Text("$\(formatPrice(position.costBasis))")
+            Text("\(position.costBasis <= 0 ? "+" : "-")$\(formatPrice(abs(position.costBasis)))")
                 .font(.subheadline)
                 .fontWeight(.medium)
+                .foregroundColor(position.costBasis <= 0 ? .green : .red)
         }
         .padding(.vertical, 4)
     }

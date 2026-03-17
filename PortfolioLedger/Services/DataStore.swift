@@ -44,6 +44,34 @@ class DataStore: ObservableObject {
         saveData()
     }
 
+    func deleteTransactions(_ toDelete: [Transaction]) {
+        let ids = Set(toDelete.map(\.id))
+        transactions.removeAll { ids.contains($0.id) }
+        recomputeLedger()
+        saveData()
+    }
+
+    /// Returns all transactions linked to an option assignment for `txns`.
+    /// Finds transactions sharing the same linkGroupId, then expands to include
+    /// all transactions for those instruments (e.g. the STO for an option close).
+    func linkedAssignmentTransactions(for txns: [Transaction]) -> [Transaction] {
+        let linkIds = Set(txns.compactMap(\.linkGroupId))
+        guard !linkIds.isEmpty else { return [] }
+        let ownIds = Set(txns.map(\.id))
+
+        // Find directly linked transactions (BTC/equity leg via linkGroupId)
+        let directlyLinked = transactions.filter {
+            guard let lid = $0.linkGroupId else { return false }
+            return linkIds.contains(lid) && !ownIds.contains($0.id)
+        }
+
+        // Expand to all transactions for those instruments (picks up the STO, etc.)
+        let linkedInstrumentIds = Set(directlyLinked.map(\.instrumentId))
+        return transactions.filter {
+            linkedInstrumentIds.contains($0.instrumentId) && !ownIds.contains($0.id)
+        }
+    }
+
     // MARK: - Ledger Computation
 
     private func recomputeLedger() {

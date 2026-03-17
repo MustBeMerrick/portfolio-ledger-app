@@ -136,6 +136,33 @@ struct ClosePositionView: View {
 
         let quantity = closeQuantity
 
+        if action == .assign {
+            // Assignment requires generating both an option close AND an equity trade.
+            // Use the position's averagePrice as the premium for computing effective equity price.
+            guard let underlyingSymbol = instrument.underlyingSymbol else { return }
+            let equityInstrument = dataStore.getOrCreateInstrument(symbol: underlyingSymbol)
+
+            let syntheticOptionTxn = Transaction(
+                instrumentId: position.instrumentId,
+                timestamp: closeTimestamp,
+                action: position.quantity < 0 ? .sellToOpen : .buyToOpen,
+                quantity: quantity,
+                price: position.averagePrice,
+                fees: 0
+            )
+
+            guard let generated = try? LedgerEngine.generateAssignmentTransactions(
+                optionTransaction: syntheticOptionTxn,
+                instrument: instrument,
+                assignmentDate: closeTimestamp,
+                equityInstrument: equityInstrument
+            ) else { return }
+
+            dataStore.addTransactions([generated.optionClose, generated.equityTrade])
+            dismiss()
+            return
+        }
+
         let transaction = Transaction(
             instrumentId: position.instrumentId,
             timestamp: closeTimestamp,

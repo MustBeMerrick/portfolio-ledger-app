@@ -565,7 +565,6 @@ extension LedgerEngine {
         let linkGroupId = UUID()
         let contractQuantity = optionTransaction.quantity
         let shareQuantity = contractQuantity * Decimal(multiplier)
-        let premiumPerShare = optionTransaction.price / Decimal(multiplier)
 
         // Close the option position (consumed by assignment)
         let optionClose = Transaction(
@@ -581,26 +580,17 @@ extension LedgerEngine {
             flags: TransactionFlags(consumedByAssignment: true)
         )
 
-        // Generate equity trade at effective price
-        let effectivePrice: Decimal
-        let equityAction: TransactionAction
-
-        if callPut == .put {
-            // Put assignment = we buy stock at strike minus premium received
-            effectivePrice = strike - premiumPerShare
-            equityAction = .buy
-        } else {
-            // Call assignment = we sell stock at strike plus premium received
-            effectivePrice = strike + premiumPerShare
-            equityAction = .sell
-        }
+        // Equity trades at the strike price. The option premium is already recorded
+        // as P/L when the option was opened (cash basis), so including it here would
+        // double-count it.
+        let equityAction: TransactionAction = (callPut == .put) ? .buy : .sell
 
         let equityTrade = Transaction(
             instrumentId: equityInstrument.id,
             timestamp: assignmentDate,
             action: equityAction,
             quantity: shareQuantity,
-            price: effectivePrice,
+            price: strike,
             fees: 0,
             notes: "Option assignment",
             tags: ["assignment"],
