@@ -1157,6 +1157,275 @@ final class LedgerEngineTests: XCTestCase {
         XCTAssertEqual(optionClose.linkGroupId, equityTrade.linkGroupId)
     }
 
+    // Existing tests use price:0 for the STO so they don't catch premium double-counting.
+    // These tests use a real premium to verify the equity price is the strike only.
+
+    // MARK: - Linked Assignment Deletion Tests
+
+    func testLinkedAssignmentTransactionsReturnsEmptyWhenNoLinkGroupId() {
+        // Transactions with no linkGroupId are not part of any assignment — nothing linked.
+        let instrumentId = UUID()
+        let buy = Transaction(instrumentId: instrumentId, action: .buy, quantity: 100, price: 140, fees: 0)
+        let sell = Transaction(instrumentId: instrumentId, action: .sell, quantity: 100, price: 150, fees: 0)
+        let all = [buy, sell]
+
+        let linked = DataStore.linkedAssignmentTransactions(in: all, for: [sell])
+        XCTAssertTrue(linked.isEmpty)
+    }
+
+    func testLinkedAssignmentTransactionsFindsOptionCloseViaLinkGroupId() {
+        // Equity sell and option close share a linkGroupId (created by assignment).
+        // Deleting the equity row should surface the option close as linked.
+        let linkId = UUID()
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let equityBuy = Transaction(instrumentId: equityId, action: .buy, quantity: 100, price: 140, fees: 0)
+        let equitySell = Transaction(instrumentId: equityId, action: .sell, quantity: 100, price: 150, fees: 0, linkGroupId: linkId)
+        let optionClose = Transaction(instrumentId: optionId, action: .buyToClose, quantity: 1, price: 0, fees: 0, linkGroupId: linkId, flags: TransactionFlags(consumedByAssignment: true))
+
+        let all = [equityBuy, equitySell, optionClose]
+        let linked = DataStore.linkedAssignmentTransactions(in: all, for: [equityBuy, equitySell])
+
+        XCTAssertTrue(linked.contains { $0.id == optionClose.id })
+    }
+
+    func testLinkedAssignmentTransactionsExpandsToFullOptionChain() {
+        // After finding the BTC via linkGroupId, the lookup must also include the STO
+        // (which has no linkGroupId) so the entire option position is deleted together.
+        let linkId = UUID()
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let equityBuy  = Transaction(instrumentId: equityId, action: .buy,        quantity: 100, price: 140, fees: 0)
+        let equitySell = Transaction(instrumentId: equityId, action: .sell,       quantity: 100, price: 150, fees: 0, linkGroupId: linkId)
+        let optionSTO  = Transaction(instrumentId: optionId, action: .sellToOpen, quantity: 1,   price: Decimal(string: "1.45")!, fees: 0)
+        let optionBTC  = Transaction(instrumentId: optionId, action: .buyToClose, quantity: 1,   price: 0,   fees: 0, linkGroupId: linkId, flags: TransactionFlags(consumedByAssignment: true))
+
+        let all = [equityBuy, equitySell, optionSTO, optionBTC]
+        let linked = DataStore.linkedAssignmentTransactions(in: all, for: [equityBuy, equitySell])
+
+        XCTAssertTrue(linked.contains { $0.id == optionBTC.id }, "Should include the option close (BTC)")
+        XCTAssertTrue(linked.contains { $0.id == optionSTO.id }, "Should include the option open (STO) so the full position is removed")
+        XCTAssertFalse(linked.contains { $0.id == equityBuy.id  }, "Should not re-include the equity buy being deleted")
+        XCTAssertFalse(linked.contains { $0.id == equitySell.id }, "Should not re-include the equity sell being deleted")
+    }
+
+    func testLinkedAssignmentTransactionsWorksFromOptionSide() {
+        // Deleting the option row (STO + BTC) should also surface the equity leg as linked.
+        let linkId = UUID()
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let equityBuy  = Transaction(instrumentId: equityId, action: .buy,        quantity: 100, price: 140, fees: 0)
+        let equitySell = Transaction(instrumentId: equityId, action: .sell,       quantity: 100, price: 150, fees: 0, linkGroupId: linkId)
+        let optionSTO  = Transaction(instrumentId: optionId, action: .sellToOpen, quantity: 1,   price: Decimal(string: "1.45")!, fees: 0)
+        let optionBTC  = Transaction(instrumentId: optionId, action: .buyToClose, quantity: 1,   price: 0,   fees: 0, linkGroupId: linkId, flags: TransactionFlags(consumedByAssignment: true))
+
+        let all = [equityBuy, equitySell, optionSTO, optionBTC]
+        let linked = DataStore.linkedAssignmentTransactions(in: all, for: [optionSTO, optionBTC])
+
+        XCTAssertTrue(linked.contains { $0.id == equitySell.id }, "Should include the assignment-generated equity sell")
+    }
+
+    func testLinkedAssignmentTransactionsIgnoresUnrelatedTransactions() {
+        // Transactions for a completely different instrument with no linkGroupId must not appear.
+        let linkId = UUID()
+        let optionId = UUID()
+        let equityId = UUID()
+        let unrelatedId = UUID()
+
+        let equitySell  = Transaction(instrumentId: equityId,    action: .sell,       quantity: 100, price: 150, fees: 0, linkGroupId: linkId)
+        let optionBTC   = Transaction(instrumentId: optionId,    action: .buyToClose, quantity: 1,   price: 0,   fees: 0, linkGroupId: linkId)
+        let unrelatedBuy = Transaction(instrumentId: unrelatedId, action: .buy,       quantity: 50,  price: 200, fees: 0)
+
+        let all = [equitySell, optionBTC, unrelatedBuy]
+        let linked = DataStore.linkedAssignmentTransactions(in: all, for: [equitySell])
+
+        XCTAssertFalse(linked.contains { $0.id == unrelatedBuy.id }, "Unrelated transactions must not be included")
+    }
+
+    // MARK: - Assignment Price Tests (no premium double-counting)
+
+    func testGenerateAssignmentPutEquityPriceIsStrikeNotAdjustedForPremium() {
+        // STO put at $2.43 premium, strike $140.
+        // Equity buy should be at $140 (strike), NOT $137.57 (strike - premium/share).
+        // The premium is already captured as P/L at open — adjusting equity price would double-count it.
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "OCL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 140,
+            callPut: .put
+        )
+        let ocl = Instrument(id: equityId, symbol: "OCL")
+
+        let sto = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "2.43")!,
+            fees: 0
+        )
+
+        let (_, equityTrade) = try! LedgerEngine.generateAssignmentTransactions(
+            optionTransaction: sto,
+            instrument: putOption,
+            assignmentDate: Date(timeIntervalSince1970: 1_750_000_000),
+            equityInstrument: ocl
+        )
+
+        XCTAssertEqual(equityTrade.action, .buy)
+        XCTAssertEqual(equityTrade.quantity, 100)
+        XCTAssertEqual(equityTrade.price, 140, "Put assignment equity price must be the strike, not strike minus premium")
+    }
+
+    func testGenerateAssignmentCallEquityPriceIsStrikeNotAdjustedForPremium() {
+        // STO call at $1.45 premium, strike $150.
+        // Equity sell should be at $150 (strike), NOT $151.45 (strike + premium/share).
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let callOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 150,
+            callPut: .call
+        )
+        let aapl = Instrument(id: equityId, symbol: "AAPL")
+
+        let sto = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "1.45")!,
+            fees: 0
+        )
+
+        let (_, equityTrade) = try! LedgerEngine.generateAssignmentTransactions(
+            optionTransaction: sto,
+            instrument: callOption,
+            assignmentDate: Date(timeIntervalSince1970: 1_750_000_000),
+            equityInstrument: aapl
+        )
+
+        XCTAssertEqual(equityTrade.action, .sell)
+        XCTAssertEqual(equityTrade.quantity, 100)
+        XCTAssertEqual(equityTrade.price, 150, "Call assignment equity price must be the strike, not strike plus premium")
+    }
+
+    func testAssignedCallTotalPLNoDoubleCounting() {
+        // Scenario: buy 100 AAPL at $140, STO 150C at $1.45, call assigned.
+        // Option P/L = $145 (premium received at STO) + $0 (BTC at $0) = $145
+        // Equity P/L = ($150 - $140) * 100 = $1,000
+        // Total = $1,145. With double-counting bug equity would be at $151.45 → P/L $1,290.
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let callOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "AAPL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 150,
+            callPut: .call
+        )
+        let aapl = Instrument(id: equityId, symbol: "AAPL")
+
+        let equityBuy = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .buy,
+            quantity: 100,
+            price: 140,
+            fees: 0
+        )
+
+        let sto = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "1.45")!,
+            fees: 0
+        )
+
+        let (optionClose, equitySell) = try! LedgerEngine.generateAssignmentTransactions(
+            optionTransaction: sto,
+            instrument: callOption,
+            assignmentDate: Date(timeIntervalSince1970: 1_800_000_000),
+            equityInstrument: aapl
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [equityBuy, sto, optionClose, equitySell],
+            instruments: [optionId: callOption, equityId: aapl]
+        )
+
+        XCTAssertEqual(output.plSummary.optionRealizedPL, 145,    "Option P/L should be $145 (premium only)")
+        XCTAssertEqual(output.plSummary.equityRealizedPL, 1_000,  "Equity P/L should be $1,000 (strike - buy price) * 100 shares")
+        XCTAssertEqual(output.plSummary.totalRealizedPL, 1_145,   "Total P/L should be $1,145 with no double-counting")
+    }
+
+    func testAssignedPutTotalPLNoDoubleCounting() {
+        // Scenario: STO 140P at $2.43, put assigned (buy 100 shares at $140),
+        // then sell those shares at $150.
+        // Option P/L = $243 (premium at STO) + $0 (assignment close) = $243
+        // Equity P/L = ($150 - $140) * 100 = $1,000
+        // Total = $1,243. With double-counting bug equity buy would be $137.57 → equity P/L $1,243 + $243 overlap.
+        let optionId = UUID()
+        let equityId = UUID()
+
+        let putOption = Instrument(
+            id: optionId,
+            underlyingSymbol: "OCL",
+            expiry: Date(timeIntervalSince1970: 1_800_000_000),
+            strike: 140,
+            callPut: .put
+        )
+        let ocl = Instrument(id: equityId, symbol: "OCL")
+
+        let sto = Transaction(
+            instrumentId: optionId,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            action: .sellToOpen,
+            quantity: 1,
+            price: Decimal(string: "2.43")!,
+            fees: 0
+        )
+
+        let (optionClose, equityBuy) = try! LedgerEngine.generateAssignmentTransactions(
+            optionTransaction: sto,
+            instrument: putOption,
+            assignmentDate: Date(timeIntervalSince1970: 1_800_000_000),
+            equityInstrument: ocl
+        )
+
+        let equitySell = Transaction(
+            instrumentId: equityId,
+            timestamp: Date(timeIntervalSince1970: 1_850_000_000),
+            action: .sell,
+            quantity: 100,
+            price: 150,
+            fees: 0
+        )
+
+        let output = LedgerEngine.process(
+            transactions: [sto, optionClose, equityBuy, equitySell],
+            instruments: [optionId: putOption, equityId: ocl]
+        )
+
+        XCTAssertEqual(equityBuy.price, 140,                       "Put assignment equity buy price must equal the strike")
+        XCTAssertEqual(output.plSummary.optionRealizedPL, 243,     "Option P/L should be $243 (premium only)")
+        XCTAssertEqual(output.plSummary.equityRealizedPL, 1_000,   "Equity P/L should be $1,000 (sell - strike) * 100 shares")
+        XCTAssertEqual(output.plSummary.totalRealizedPL, 1_243,    "Total P/L should be $1,243 with no double-counting")
+    }
+
     func testEquitySellAcrossMultipleLotsProducesMultipleRealizedPLs() {
         let instrumentId = UUID()
         let msft = Instrument(id: instrumentId, symbol: "MSFT")
