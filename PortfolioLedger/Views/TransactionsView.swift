@@ -141,7 +141,16 @@ struct TransactionsView: View {
     private func deleteTransactions(at offsets: IndexSet) {
         for index in offsets {
             let row = ledgerRows[index]
-            let rowTxns = row.isOptionGroup || row.isEquityGroup ? row.transactions : [row.transaction].compactMap { $0 }
+
+            // Open-remainder rows are residual shares of a partially-consumed lot —
+            // there is no standalone transaction for just those shares, so they
+            // cannot be deleted independently. Skip silently.
+            if row.quantityOverride != nil { continue }
+
+            let rowTxns = row.isOptionGroup || row.isEquityGroup
+                ? row.transactions
+                : [row.transaction].compactMap { $0 }
+
             let linked = dataStore.linkedAssignmentTransactions(for: rowTxns)
             if !linked.isEmpty {
                 pendingDeleteTransactions = rowTxns
